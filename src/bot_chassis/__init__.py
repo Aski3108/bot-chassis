@@ -1,83 +1,106 @@
-"""
-Пакет универсального переносимого костяка Telegram-бота (bot_chassis).
-Предоставляет готовый каркас интерфейса, навигации, меню, личного кабинета
-и двустороннего моста технической поддержки.
+"""Пакет шасси кнопочного интерфейса Telegram-бота (Button Chassis / bot_core).
+
+Предоставляет переносимую раму для Telegram-ботов на aiogram v3:
+- Постоянная нижняя клавиатура со слотом для доменных кнопок (domain_rows) и тумблерами разделов.
+- Системное синее меню команд Telegram (set_my_commands и хук register_button_chassis_startup).
+- Команды /menu (неудаляемый носитель клавиатуры), /help и /support.
+- Бесшовная смена экранов с политиками CardClosePolicy (DELETE / DROP_MARKUP).
+- Дедупликация кликов и отмена устаревших задач (ActiveTaskTracker).
+- Хранилище ввода с честным TTL 15 минут (PendingInputStore).
+- Двусторонний мост поддержки по композитному ключу (chat_id, message_id) с персистентностью и лимитом тикетов.
+- Порты для доменных обработчиков Кабинета и Info с обязательной регистрацией экранов.
 """
 
 from .contracts import (
     BTN_CABINET,
     BTN_INFO,
     BTN_SUPPORT,
+    BTN_CABINET_RU,
+    BTN_CABINET_EN,
+    BTN_INFO_RU,
+    BTN_INFO_EN,
+    BTN_SUPPORT_RU,
+    BTN_SUPPORT_EN,
+    ALL_SERVICE_MENU_BUTTONS,
     ALL_MAIN_MENU_BUTTONS,
     is_main_menu_button,
+    extract_domain_labels,
+    MenuLabels,
+    CB_SUPPORT_CANCEL,
+    CB_NAV_CLOSE,
 )
 from .keyboards import (
     build_main_menu_keyboard,
-    build_cabinet_inline_keyboard,
-    build_info_inline_keyboard,
-    build_support_inline_keyboard,
-    build_back_reply_keyboard,
     build_inline_keyboard,
+    build_support_prompt_keyboard,
+    build_close_inline_keyboard,
 )
 from .lifecycle import (
+    UserScreenTracker,
+    CardClosePolicy,
+    close_card_screen,
     edit_or_send,
-    close_screen,
-    close_previous_user_screen,
-    remember_user_screen,
-    get_user_last_screen,
-    forget_user_screen,
 )
 from .dispatcher import (
     ActiveTaskTracker,
-    get_task_tracker,
 )
 from .followup import (
     PendingInput,
     PendingInputKind,
-    InMemoryPendingInputStore,
-    get_pending_input_store,
+    PendingInputStore,
 )
 from .commands import (
     setup_bot_commands,
-    notify_admins_on_startup,
+    register_button_chassis_startup,
 )
 from .support_bridge import (
+    SupportThreadStore,
     send_user_report_to_support,
     deliver_support_reply_to_user,
-    register_support_thread,
-    resolve_user_by_admin_reply,
 )
-from .router import create_bot_chassis_router
+from .router import (
+    create_button_chassis_router,
+    SupportTicketActiveFilter,
+)
+
+# Алиасы для обратной совместимости
+create_bot_core_router = create_button_chassis_router
+close_screen = close_card_screen
 
 __all__ = [
     "BTN_CABINET",
     "BTN_INFO",
     "BTN_SUPPORT",
+    "BTN_CABINET_RU",
+    "BTN_CABINET_EN",
+    "BTN_INFO_RU",
+    "BTN_INFO_EN",
+    "BTN_SUPPORT_RU",
+    "BTN_SUPPORT_EN",
+    "ALL_SERVICE_MENU_BUTTONS",
     "ALL_MAIN_MENU_BUTTONS",
     "is_main_menu_button",
+    "extract_domain_labels",
+    "MenuLabels",
     "build_main_menu_keyboard",
-    "build_cabinet_inline_keyboard",
-    "build_info_inline_keyboard",
-    "build_support_inline_keyboard",
-    "build_back_reply_keyboard",
     "build_inline_keyboard",
-    "edit_or_send",
+    "build_support_prompt_keyboard",
+    "build_close_inline_keyboard",
+    "UserScreenTracker",
+    "CardClosePolicy",
+    "close_card_screen",
     "close_screen",
-    "close_previous_user_screen",
-    "remember_user_screen",
-    "get_user_last_screen",
-    "forget_user_screen",
+    "edit_or_send",
     "ActiveTaskTracker",
-    "get_task_tracker",
     "PendingInput",
     "PendingInputKind",
-    "InMemoryPendingInputStore",
-    "get_pending_input_store",
+    "PendingInputStore",
     "setup_bot_commands",
-    "notify_admins_on_startup",
+    "register_button_chassis_startup",
+    "SupportThreadStore",
     "send_user_report_to_support",
     "deliver_support_reply_to_user",
-    "register_support_thread",
-    "resolve_user_by_admin_reply",
-    "create_bot_chassis_router",
+    "create_button_chassis_router",
+    "create_bot_core_router",
+    "SupportTicketActiveFilter",
 ]

@@ -1,58 +1,55 @@
-"""
-Управление сервисными командами Telegram Bot API и оповещениями запуска (bot_chassis.commands).
-Реализует:
-- Регистрацию bot.set_my_commands (синяя кнопка 'Меню' в клиентах Telegram).
-- Оповещение администраторов при старте процесса с прикреплением актуальной клавиатуры.
+"""Регистрация команд Telegram Bot API (Button Chassis).
+
+Управляет системной синей кнопкой «Меню» в клиенте Telegram:
+- Регистрирует команды через bot.set_my_commands().
+- Предоставляет хук register_button_chassis_startup(dp, bot) для автоматического
+  вызова при старте диспетчера aiogram v3.
 """
 
-from typing import List, Sequence
-from aiogram import Bot
+from __future__ import annotations
+from typing import Optional, Sequence
+from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from loguru import logger
 
-from .keyboards import build_main_menu_keyboard
 
-
-async def setup_bot_commands(bot: Bot) -> None:
+async def setup_bot_commands(
+    bot: Bot,
+    custom_commands: Optional[Sequence[BotCommand]] = None,
+) -> None:
     """
     Регистрирует список команд в Telegram Bot API.
-    Гарантирует, что у пользователя ВСЕГДА будет доступна синяя кнопка 'Меню' в левом нижнем углу,
-    даже если нижняя клавиатура была случайно свернута или очищена история переписки.
+    Гарантирует доступность синей кнопки «Меню» в клиенте Telegram для всех пользователей.
     """
-    commands = [
-        BotCommand(command="start", description="🚀 Запустить бота / Главное меню"),
-        BotCommand(command="menu", description="📱 Открыть главное меню"),
-        BotCommand(command="help", description="ℹ️ О сервисе и методологии"),
+    default_commands = [
+        BotCommand(command="start", description="🚀 Главное меню"),
+        BotCommand(command="menu", description="📱 Восстановить кнопки меню"),
+        BotCommand(command="help", description="ℹ️ О сервисе и инструкция"),
         BotCommand(command="support", description="💬 Служба поддержки"),
     ]
+    commands_map = {c.command: c for c in default_commands}
+    if custom_commands:
+        for cmd in custom_commands:
+            commands_map[cmd.command] = cmd
+    commands = list(commands_map.values())
     try:
         await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-        logger.info("✅ Команды бота успешно зарегистрированы в Bot API (set_my_commands).")
+        logger.info(f"✅ Команды бота ({len(commands)}) успешно зарегистрированы через set_my_commands.")
     except Exception as e:
         logger.warning(f"⚠️ Не удалось зарегистрировать команды через set_my_commands: {e}")
 
 
-async def notify_admins_on_startup(
+def register_button_chassis_startup(
+    dp: Dispatcher,
     bot: Bot,
-    admin_ids: Sequence[int],
-    startup_message: str = "🚀 Бот успешно запущен и готов к работе.",
-) -> int:
+    custom_commands: Optional[Sequence[BotCommand]] = None,
+) -> None:
     """
-    Оповещает администраторов о старте процесса и принудительно отправляет
-    им актуальную нижнюю Reply-клавиатуру (решение проблемы потери кнопок при рестартах).
+    Регистрирует вызов setup_bot_commands на хук запуска диспетчера aiogram v3.
+    Гарантирует, что синяя кнопка «Меню» активируется при старте бота автоматически.
     """
-    delivered = 0
-    menu_keyboard = build_main_menu_keyboard()
-    for admin_id in admin_ids:
-        try:
-            await bot.send_message(
-                chat_id=admin_id,
-                text=startup_message,
-                reply_markup=menu_keyboard,
-            )
-            delivered += 1
-        except Exception as e:
-            logger.debug(f"Не удалось отправить уведомление о старте админу {admin_id}: {e}")
-    
-    logger.info(f"📢 Уведомление о старте доставлено {delivered}/{len(admin_ids)} администраторам.")
-    return delivered
+    async def _on_startup() -> None:
+        await setup_bot_commands(bot, custom_commands=custom_commands)
+
+    dp.startup.register(_on_startup)
+    logger.info("🔗 Хук setup_bot_commands успешно зарегистрирован в dp.startup.")

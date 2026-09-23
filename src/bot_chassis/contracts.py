@@ -1,21 +1,39 @@
-"""
-Контракты и константы пользовательского интерфейса (bot_chassis).
-Определяет стабильные названия кнопок, маркеры маршрутизации и валидацию.
+"""Контракты и константы шасси кнопочного интерфейса (Button Chassis).
+
+Определяет названия кнопок главного меню на разных языках,
+алиасы для мгновенного сброса ожидания ввода, стабильные callback-префиксы
+и предикаты распознавания кнопок (включая доменные ряды).
 """
 
+from __future__ import annotations
 from dataclasses import dataclass
+from typing import Optional, Sequence
 
-# Канонические названия постоянных кнопок главного меню
-BTN_CABINET = "👤 Личный кабинет"
-BTN_INFO = "ℹ️ Info"
-BTN_SUPPORT = "💬 Поддержка"
+# Русские названия кнопок (по умолчанию)
+BTN_CABINET_RU: str = "👤 Личный кабинет"
+BTN_INFO_RU: str = "ℹ️ Info"
+BTN_SUPPORT_RU: str = "💬 Поддержка"
 
-# Обратная совместимость с альтернативными версиями текста
+# Английские названия кнопок
+BTN_CABINET_EN: str = "👤 Account"
+BTN_INFO_EN: str = "ℹ️ Info"
+BTN_SUPPORT_EN: str = "💬 Support"
+
+# Канонические дефолты
+BTN_CABINET: str = BTN_CABINET_RU
+BTN_INFO: str = BTN_INFO_RU
+BTN_SUPPORT: str = BTN_SUPPORT_RU
+
+# Алиасы для распознавания кликов и сброса ввода
 LEGACY_BTN_CABINET_ALIASES = frozenset({
     "Личный кабинет",
     "Кабинет",
     "💼 Личный кабинет",
     "Мой профиль",
+    BTN_CABINET_RU,
+    BTN_CABINET_EN,
+    "Account",
+    "Profile",
 })
 
 LEGACY_BTN_INFO_ALIASES = frozenset({
@@ -24,6 +42,8 @@ LEGACY_BTN_INFO_ALIASES = frozenset({
     "ℹ️ О сервисе",
     "Информация",
     "FAQ",
+    BTN_INFO_RU,
+    BTN_INFO_EN,
 })
 
 LEGACY_BTN_SUPPORT_ALIASES = frozenset({
@@ -32,10 +52,12 @@ LEGACY_BTN_SUPPORT_ALIASES = frozenset({
     "🛟 Поддержка",
     "Report",
     "Помощь",
+    "Support",
+    BTN_SUPPORT_RU,
+    BTN_SUPPORT_EN,
 })
 
-# Полный набор распознаваемых кнопок главного меню для мгновенного сброса фоллоу-апов
-ALL_MAIN_MENU_BUTTONS = frozenset({
+ALL_SERVICE_MENU_BUTTONS: frozenset[str] = frozenset({
     BTN_CABINET,
     BTN_INFO,
     BTN_SUPPORT,
@@ -44,33 +66,58 @@ ALL_MAIN_MENU_BUTTONS = frozenset({
     *LEGACY_BTN_SUPPORT_ALIASES,
 })
 
-# Стабильные префиксы callback_data для инлайн-кнопок
-CALLBACK_PREFIX_CABINET = "cabinet:"
-CALLBACK_PREFIX_INFO = "info:"
-CALLBACK_PREFIX_SUPPORT = "support:"
-CALLBACK_PREFIX_NAV = "nav:"
+# Алиас для обратной совместимости
+ALL_MAIN_MENU_BUTTONS = ALL_SERVICE_MENU_BUTTONS
 
-SUPPORTED_CALLBACK_PREFIXES = (
-    CALLBACK_PREFIX_CABINET,
-    CALLBACK_PREFIX_INFO,
-    CALLBACK_PREFIX_SUPPORT,
-    CALLBACK_PREFIX_NAV,
-)
+# Стабильные префиксы callback_data
+CALLBACK_PREFIX_CABINET: str = "core_cab:"
+CALLBACK_PREFIX_INFO: str = "core_info:"
+CALLBACK_PREFIX_SUPPORT: str = "core_sup:"
+CALLBACK_PREFIX_NAV: str = "core_nav:"
+
+CB_SUPPORT_CANCEL: str = f"{CALLBACK_PREFIX_SUPPORT}cancel"
+CB_NAV_CLOSE: str = f"{CALLBACK_PREFIX_NAV}close"
 
 
-def is_main_menu_button(text: str | None) -> bool:
+def extract_domain_labels(domain_rows: Optional[Sequence[Sequence[str]]]) -> frozenset[str]:
+    """Извлекает набор строковых подписей из доменных рядов кнопок."""
+    if not domain_rows:
+        return frozenset()
+    labels = set()
+    for row in domain_rows:
+        for btn in row:
+            if btn and isinstance(btn, str):
+                labels.add(btn.strip())
+    return frozenset(labels)
+
+
+def is_main_menu_button(
+    text: str | None,
+    domain_labels: Optional[frozenset[str]] = None,
+) -> bool:
     """
-    Проверяет, совпадает ли текст сообщения с любой кнопкой главного меню.
-    Используется для мгновенного прерывания режима ввода текста (follow-up)
-    при нажатии пользователем навигационной кнопки.
+    Проверяет, является ли текст сообщения кликом по любой кнопке меню
+    (служебной тройке либо доменным кнопкам проекта).
     """
     if not text:
         return False
-    return text.strip() in ALL_MAIN_MENU_BUTTONS
+    clean = text.strip()
+    if clean in ALL_SERVICE_MENU_BUTTONS:
+        return True
+    if domain_labels and clean in domain_labels:
+        return True
+    return False
 
 
 @dataclass(slots=True, frozen=True)
-class CoreMenuLabels:
-    cabinet: str = BTN_CABINET
-    info: str = BTN_INFO
-    support: str = BTN_SUPPORT
+class MenuLabels:
+    """Контейнер локализованных подписей служебной тройки кнопок."""
+    cabinet: str
+    info: str
+    support: str
+
+    @classmethod
+    def for_locale(cls, locale: str = "ru") -> MenuLabels:
+        if locale == "en":
+            return cls(cabinet=BTN_CABINET_EN, info=BTN_INFO_EN, support=BTN_SUPPORT_EN)
+        return cls(cabinet=BTN_CABINET_RU, info=BTN_INFO_RU, support=BTN_SUPPORT_RU)

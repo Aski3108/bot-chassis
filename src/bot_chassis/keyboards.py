@@ -1,9 +1,15 @@
-"""
-Фабрика клавиатур для Telegram-бота на базе aiogram v3 (bot_chassis).
-Реализует постоянную нижнюю Reply-клавиатуру (3 кнопки) и конструктор Inline-меню.
+"""Фабрика клавиатур шасси интерфейса (Button Chassis).
+
+Предоставляет:
+1. Постоянную нижнюю Reply-клавиатуру с поддержкой:
+   - слота доменного ряда (domain_rows) над служебной тройкой;
+   - тумблеров включения/отключения разделов (enable_cabinet, enable_info, enable_support);
+   - персональной локализации (locale).
+2. Универсальные конструкторы Inline-клавиатур без хардкода доменной логики.
 """
 
-from typing import List, Tuple, Optional
+from __future__ import annotations
+from typing import Sequence, Optional
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -11,28 +17,50 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
-from .contracts import BTN_CABINET, BTN_INFO, BTN_SUPPORT
+from .contracts import MenuLabels, CB_NAV_CLOSE, CB_SUPPORT_CANCEL
 
 
 def build_main_menu_keyboard(
+    domain_rows: Optional[Sequence[Sequence[str]]] = None,
+    locale: str = "ru",
+    enable_cabinet: bool = True,
+    enable_info: bool = True,
+    enable_support: bool = True,
     placeholder: str = "Выберите действие в меню",
 ) -> ReplyKeyboardMarkup:
     """
-    Создает каноническую нижнюю Reply-клавиатуру из 3 кнопок:
-      [👤 Личный кабинет]
-      [ℹ️ Info] | [💬 Поддержка]
-
-    Ключевые параметры Telegram Bot API:
-    - is_persistent=True: клавиатура не сворачивается при вводе текста пользователем.
-    - resize_keyboard=True: кнопки компактно подгоняются по высоте.
-    - one_time_keyboard=False: клавиатура остается постоянной.
-    - input_field_placeholder: подсказка в строке ввода.
+    Создает нижнюю Reply-клавиатуру:
+    - Если переданы domain_rows — они размещаются ВЕРХНИМИ рядами над служебной тройкой.
+      (Например, для Chat Listener: [["Ваши чаты", "Ваши слова"]]).
+    - Ниже размещаются служебные кнопки (в зависимости от тумблеров):
+        [👤 Личный кабинет]
+        [ℹ️ Info] [💬 Поддержка]
     """
+    labels = MenuLabels.for_locale(locale)
+    keyboard: list[list[KeyboardButton]] = []
+
+    # 1. Доменный ряд (если передан кузовом)
+    if domain_rows:
+        for row in domain_rows:
+            valid_btns = [KeyboardButton(text=btn_text) for btn_text in row if btn_text]
+            if valid_btns:
+                keyboard.append(valid_btns)
+
+    # 2. Служебная тройка с тумблерами
+    if enable_cabinet:
+        keyboard.append([KeyboardButton(text=labels.cabinet)])
+
+    second_row: list[KeyboardButton] = []
+    if enable_info:
+        second_row.append(KeyboardButton(text=labels.info))
+    if enable_support:
+        second_row.append(KeyboardButton(text=labels.support))
+
+    if second_row:
+        keyboard.append(second_row)
+
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_CABINET)],
-            [KeyboardButton(text=BTN_INFO), KeyboardButton(text=BTN_SUPPORT)],
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
         is_persistent=True,
         one_time_keyboard=False,
@@ -40,25 +68,12 @@ def build_main_menu_keyboard(
     )
 
 
-def build_back_reply_keyboard(
-    button_text: str = "🔙 Главное меню",
-) -> ReplyKeyboardMarkup:
-    """Вспомогательная Reply-клавиатура возврата в главное меню."""
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=button_text)]],
-        resize_keyboard=True,
-        one_time_keyboard=False,
-    )
-
-
 def build_inline_keyboard(
-    rows: List[List[Tuple[str, str]]],
+    rows: Sequence[Sequence[tuple[str, str]]],
 ) -> InlineKeyboardMarkup:
     """
     Универсальный построитель инлайн-клавиатуры из списка строк.
     Каждый элемент — кортеж: (текст_кнопки, callback_data_или_url).
-    Если значение начинается с 'http://' или 'https://' или 'tg://' — создается url-кнопка,
-    иначе — callback_data.
     """
     inline_keyboard = []
     for row in rows:
@@ -72,48 +87,25 @@ def build_inline_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def build_cabinet_inline_keyboard(
-    has_reports: bool = False,
-    last_report_id: Optional[str] = None,
+def build_support_prompt_keyboard(
+    cancel_callback: str = CB_SUPPORT_CANCEL,
+    cancel_label: str = "🔙 Отмена",
 ) -> InlineKeyboardMarkup:
-    """Инлайн-кнопки Личного кабинета."""
-    rows = []
-    if has_reports and last_report_id:
-        rows.append([("📥 Скачать последний отчёт (PDF)", f"cabinet:download:{last_report_id}")])
-        rows.append([("📜 Архив отчётов", "cabinet:archive:page:1")])
-    rows.append([("⭐ Пополнить баланс Stars", "cabinet:buy_stars")])
-    return build_inline_keyboard(rows)
+    """Инлайн-клавиатура экрана ожидания ввода тикета поддержки (кнопка отмены)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback)]
+        ]
+    )
 
 
-def build_info_inline_keyboard(
-    locale: str = "ru",
-    show_projects_link: bool = True,
+def build_close_inline_keyboard(
+    close_callback: str = CB_NAV_CLOSE,
+    close_label: str = "✖️ Закрыть",
 ) -> InlineKeyboardMarkup:
-    """Инлайн-кнопки раздела Info (научный хаб, язык, проекты)."""
-    next_lang_label = "🌐 English" if locale == "ru" else "🌐 Русский"
-    next_lang_code = "en" if locale == "ru" else "ru"
-    
-    rows = [
-        [
-            (next_lang_label, f"info:lang:{next_lang_code}"),
-            ("🚀 Другие проекты", "info:projects") if show_projects_link else None,
-        ],
-        [("📖 Научная методология", "info:methodology")],
-        [("📲 Инструкция по экспорту", "info:export_guide")],
-        [("⚖️ Конфиденциальность (152-ФЗ)", "info:privacy")],
-    ]
-    # Фильтруем пустые элементы
-    cleaned_rows = [[btn for btn in row if btn is not None] for row in rows]
-    return build_inline_keyboard(cleaned_rows)
-
-
-def build_support_inline_keyboard(
-    support_chat_url: Optional[str] = None,
-) -> InlineKeyboardMarkup:
-    """Инлайн-кнопки раздела Поддержки."""
-    rows = []
-    if support_chat_url:
-        rows.append([("👥 Чат комьюнити", support_chat_url)])
-    rows.append([("⭐ Поддержать проект (Stars)", "support:donate_stars")])
-    rows.append([("🔙 Закрыть", "nav:close")])
-    return build_inline_keyboard(rows)
+    """Инлайн-кнопка закрытия сервисного сообщения."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=close_label, callback_data=close_callback)]
+        ]
+    )

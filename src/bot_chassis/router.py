@@ -1,275 +1,348 @@
-"""
-Основной маршрутизатор универсального костяка бота (bot_chassis.router).
-Связывает постоянное нижнее меню, экраны Кабинета, Info и Поддержки,
-а также обрабатывает двусторонний мост Chat Listener.
+"""Основной маршрутизатор шасси кнопочного интерфейса (Button Chassis).
+
+Ключевые свойства:
+1. Доменные кнопки (domain_rows) автоматически входят в список кнопок,
+   сбрасывающих ожидание ввода тикета поддержки.
+2. Сообщение /menu несёт нижнюю Reply-клавиатуру и НИКОГДА не регистрируется
+   как удаляемая карточка. Нижняя полоска кнопок не пропадёт.
+3. Карточки Кабинета, Info и Поддержки регистрируются в UserScreenTracker и закрываются
+   в соответствии с политикой CardClosePolicy (DELETE или DROP_MARKUP).
+4. Порты render_cabinet_callback и render_info_callback: если колбэк возвращает
+   отправленное Message, оно автоматически запоминается в трекере экранов.
+5. Команды /help и /support открывают соответствующие разделы.
+6. Тумблеры enable_cabinet, enable_info, enable_support позволяют отключать разделы.
+7. Поддержка персональной локали пользователя через get_user_locale(user_id).
+8. СТРОГИЙ фильтр SupportTicketActiveFilter: чужие ссылки, файлы и команды
+   пролетают сквозь шасси к доменному шлюзу.
 """
 
+from __future__ import annotations
 import asyncio
-from typing import Optional
+from typing import Optional, Callable, Awaitable, Sequence
 from aiogram import Router, types, F, Bot
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import Command, Filter
 from loguru import logger
 
 from .contracts import (
-    BTN_CABINET,
-    BTN_INFO,
-    BTN_SUPPORT,
-    ALL_MAIN_MENU_BUTTONS,
+    BTN_CABINET_RU,
+    BTN_CABINET_EN,
+    BTN_INFO_RU,
+    BTN_INFO_EN,
+    BTN_SUPPORT_RU,
+    BTN_SUPPORT_EN,
     is_main_menu_button,
-    CALLBACK_PREFIX_CABINET,
-    CALLBACK_PREFIX_INFO,
-    CALLBACK_PREFIX_SUPPORT,
-    CALLBACK_PREFIX_NAV,
+    extract_domain_labels,
+    CB_SUPPORT_CANCEL,
+    CB_NAV_CLOSE,
 )
 from .keyboards import (
     build_main_menu_keyboard,
-    build_cabinet_inline_keyboard,
-    build_info_inline_keyboard,
-    build_support_inline_keyboard,
+    build_support_prompt_keyboard,
 )
-from .lifecycle import (
-    edit_or_send,
-    close_previous_user_screen,
-    close_screen,
-)
-from .dispatcher import get_task_tracker
-from .followup import (
-    get_pending_input_store,
-    PendingInput,
-    PendingInputKind,
-)
+from .lifecycle import UserScreenTracker, CardClosePolicy
+from .dispatcher import ActiveTaskTracker
+from .followup import PendingInputStore, PendingInput, PendingInputKind
 from .support_bridge import (
+    SupportThreadStore,
     send_user_report_to_support,
     deliver_support_reply_to_user,
 )
 
 
-def create_bot_chassis_router(
+class SupportTicketActiveFilter(Filter):
+    """
+    Фильтр, пропускающий сообщение ТОЛЬКО если пользователь прямо сейчас пишет в саппорт.
+    Если пользователь нажал любую кнопку меню (служебную или доменную) — тикет прерывается!
+    """
+    def __init__(
+        self,
+        store: PendingInputStore,
+        domain_labels: Optional[frozenset[str]] = None,
+    ) -> None:
+        self.store = store
+        self.domain_labels = domain_labels or frozenset()
+
+    async def __call__(self, message: types.Message) -> bool:
+        if not message.from_user:
+            return False
+        # Клик по любой кнопке меню (включая доменные «Ваши чаты») сбрасывает ввод
+        if is_main_menu_button(message.text, domain_labels=self.domain_labels):
+            self.store.clear(message.from_user.id)
+            return False
+        return self.store.is_active(message.from_user.id, PendingInputKind.SUPPORT_MESSAGE)
+
+
+def create_button_chassis_router(
     support_chat_id: Optional[int] = None,
-    project_name: str = "Profiling Framework",
+    domain_rows: Optional[Sequence[Sequence[str]]] = None,
+    enable_cabinet: bool = True,
+    enable_info: bool = True,
+    enable_support: bool = True,
+    render_cabinet_callback: Optional[Callable[[types.Message, int, Bot], Awaitable[Optional[types.Message]]]] = None,
+    render_info_callback: Optional[Callable[[types.Message, int, Bot], Awaitable[Optional[types.Message]]]] = None,
+    cabinet_close_policy: CardClosePolicy = CardClosePolicy.DELETE,
+    info_close_policy: CardClosePolicy = CardClosePolicy.DELETE,
+    get_user_locale: Optional[Callable[[int], str]] = None,
+    task_tracker: Optional[ActiveTaskTracker] = None,
+    pending_store: Optional[PendingInputStore] = None,
+    screen_tracker: Optional[UserScreenTracker] = None,
+    thread_store: Optional[SupportThreadStore] = None,
+    project_label: str = "Сервис",
+    default_locale: str = "ru",
 ) -> Router:
     """
-    Фабрика универсального роутера bot_chassis.
-    Принимает support_chat_id для работы моста Chat Listener.
+    Фабрика универсального роутера шасси кнопок.
+    
+    Все зависимости экземплярные (не делят память между ботами).
     """
-    router = Router(name="bot_chassis")
-    tracker = get_task_tracker()
-    pending_store = get_pending_input_store()
+    router = Router(name="button_chassis")
+    tracker = task_tracker or ActiveTaskTracker()
+    pending = pending_store or PendingInputStore(ttl_seconds=900.0)
+    screens = screen_tracker or UserScreenTracker()
+    threads = thread_store or SupportThreadStore()
+
+    domain_labels = extract_domain_labels(domain_rows)
+
+    def _resolve_locale(user_id: int) -> str:
+        if get_user_locale:
+            try:
+                return get_user_locale(user_id) or default_locale
+            except Exception:
+                pass
+        return default_locale
+
+    def _menu_kb(user_id: int):
+        loc = _resolve_locale(user_id)
+        return build_main_menu_keyboard(
+            domain_rows=domain_rows,
+            locale=loc,
+            enable_cabinet=enable_cabinet,
+            enable_info=enable_info,
+            enable_support=enable_support,
+        )
 
     # ----------------------------------------------------------------------
-    # 1. СТАРТ (/start): Флеш-экран 3 сек -> Приветствие + 152-ФЗ + Меню
+    # 1. КОМАНДА /menu: Восстановление нижней клавиатуры (НЕ УДАЛЯЕТСЯ!)
     # ----------------------------------------------------------------------
-    @router.message(CommandStart())
-    async def handle_start(message: types.Message):
+    @router.message(Command("menu"))
+    async def handle_cmd_menu(message: types.Message):
         user_id = message.from_user.id if message.from_user else 0
-        current_task = asyncio.current_task()
-        if not tracker.should_process(user_id, "start", current_task):
-            return
+        pending.clear(user_id)
+        # Закрываем предыдущую карточку контента, но само сообщение с клавиатурой живёт!
+        await screens.close_previous_card(message.bot, user_id)
 
-        try:
-            # Сбрасываем любые зависшие режимы ожидания ввода
-            pending_store.clear(user_id)
+        await message.answer(
+            "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:",
+            reply_markup=_menu_kb(user_id),
+            parse_mode="HTML",
+        )
 
-            # Шаг 1: Стильный флеш-экран преимуществ на 3 секунды
-            flash_text = (
-                f"✨ <b>{project_name}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚡ <i>Глубокий психолингвистический анализ</i>\n"
-                f"🔒 <i>100% анонимно (RAM-only обработка)</i>\n"
-                f"🎯 <i>Научно валидированные шкалы (C1–C7)</i>"
+    # ----------------------------------------------------------------------
+    # 2. РАЗДЕЛ: [👤 Личный кабинет] (кнопка меню)
+    # ----------------------------------------------------------------------
+    if enable_cabinet:
+        cabinet_aliases = {BTN_CABINET_RU, BTN_CABINET_EN, "Личный кабинет", "Кабинет", "💼 Личный кабинет", "Account"}
+
+        @router.message(F.text.in_(cabinet_aliases))
+        async def handle_cabinet(message: types.Message):
+            user_id = message.from_user.id if message.from_user else 0
+            current_task = asyncio.current_task()
+            if not tracker.should_process(user_id, "menu:cabinet", current_task):
+                return
+
+            try:
+                pending.clear(user_id)
+                # Закрываем предыдущую карточку экрана перед показом новой
+                await screens.close_previous_card(message.bot, user_id)
+
+                if render_cabinet_callback:
+                    sent = await render_cabinet_callback(message, user_id, message.bot)
+                    if sent and isinstance(sent, types.Message):
+                        screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=cabinet_close_policy)
+                    else:
+                        logger.warning(
+                            f"render_cabinet_callback вернул {type(sent).__name__} вместо aiogram.types.Message. "
+                            f"Экран не зафиксирован в UserScreenTracker и не закроется автоматически."
+                        )
+                else:
+                    # Нейтральная карточка шасси (без зашитой коммерции)
+                    sent = await message.answer(
+                        f"👤 <b>Личный кабинет</b>\n\n"
+                        f"ID: <code>{user_id}</code>\n"
+                        f"Раздел настроен в шасси.",
+                        parse_mode="HTML",
+                    )
+                    screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=cabinet_close_policy)
+            finally:
+                tracker.release(user_id, current_task)
+
+    # ----------------------------------------------------------------------
+    # 3. РАЗДЕЛ: [ℹ️ Info] (кнопка меню и команда /help)
+    # ----------------------------------------------------------------------
+    if enable_info:
+        info_aliases = {BTN_INFO_RU, BTN_INFO_EN, "Info", "О сервисе", "ℹ️ О сервисе", "Информация", "FAQ"}
+
+        async def _open_info(message: types.Message):
+            user_id = message.from_user.id if message.from_user else 0
+            current_task = asyncio.current_task()
+            if not tracker.should_process(user_id, "menu:info", current_task):
+                return
+
+            try:
+                pending.clear(user_id)
+                await screens.close_previous_card(message.bot, user_id)
+
+                if render_info_callback:
+                    sent = await render_info_callback(message, user_id, message.bot)
+                    if sent and isinstance(sent, types.Message):
+                        screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
+                    else:
+                        logger.warning(
+                            f"render_info_callback вернул {type(sent).__name__} вместо aiogram.types.Message. "
+                            f"Экран не зафиксирован в UserScreenTracker и не закроется автоматически."
+                        )
+                else:
+                    # Нейтральная карточка Info
+                    sent = await message.answer(
+                        f"ℹ️ <b>О сервисе ({project_label})</b>\n\n"
+                        f"Информационный раздел проекта.",
+                        parse_mode="HTML",
+                    )
+                    screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
+            finally:
+                tracker.release(user_id, current_task)
+
+        @router.message(F.text.in_(info_aliases))
+        async def handle_info(message: types.Message):
+            await _open_info(message)
+
+        @router.message(Command("help"))
+        async def handle_cmd_help(message: types.Message):
+            await _open_info(message)
+
+    # ----------------------------------------------------------------------
+    # 4. РАЗДЕЛ: [💬 Поддержка] (кнопка меню и команда /support)
+    # ----------------------------------------------------------------------
+    if enable_support:
+        support_aliases = {BTN_SUPPORT_RU, BTN_SUPPORT_EN, "Поддержка", "Служба поддержки", "🛟 Поддержка", "Report", "Support"}
+
+        async def _open_support(message: types.Message):
+            user_id = message.from_user.id if message.from_user else 0
+            current_task = asyncio.current_task()
+            if not tracker.should_process(user_id, "menu:support", current_task):
+                return
+
+            try:
+                # Активируем режим ожидания ввода тикета
+                pending.set(
+                    user_id,
+                    PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE, origin_chat_id=message.chat.id),
+                )
+                await screens.close_previous_card(message.bot, user_id)
+
+                support_prompt = (
+                    f"💬 <b>Служба поддержки ({project_label})</b>\n\n"
+                    f"Напишите ваш вопрос или опишите проблему <b>прямо в ответном сообщении</b>.\n\n"
+                    f"Вы можете отправить текст, скриншот или голосовое сообщение — "
+                    f"команда получит его и ответит прямо сюда.\n\n"
+                    f"<i>Для отмены нажмите кнопку ниже или выберите любой пункт меню.</i>"
+                )
+                prompt_kb = build_support_prompt_keyboard(cancel_callback=CB_SUPPORT_CANCEL)
+                sent = await message.answer(support_prompt, reply_markup=prompt_kb, parse_mode="HTML")
+                screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=CardClosePolicy.DELETE)
+            finally:
+                tracker.release(user_id, current_task)
+
+        @router.message(F.text.in_(support_aliases))
+        async def handle_support(message: types.Message):
+            await _open_support(message)
+
+        @router.message(Command("support"))
+        async def handle_cmd_support(message: types.Message):
+            await _open_support(message)
+
+        # Инлайн-кнопка отмены ввода тикета
+        @router.callback_query(F.data == CB_SUPPORT_CANCEL)
+        async def handle_support_cancel(query: types.CallbackQuery):
+            user_id = query.from_user.id if query.from_user else 0
+            pending.clear(user_id)
+            screens.forget_card(user_id)
+            await query.answer("Обращение отменено")
+            if query.message:
+                try:
+                    await query.message.delete()
+                except Exception:
+                    await query.message.edit_reply_markup(reply_markup=None)
+
+    # ----------------------------------------------------------------------
+    # 5. ОБЩИЕ ИНЛАЙН-ОБРАБОТЧИКИ
+    # ----------------------------------------------------------------------
+    @router.callback_query(F.data == CB_NAV_CLOSE)
+    async def handle_nav_close(query: types.CallbackQuery):
+        user_id = query.from_user.id if query.from_user else 0
+        screens.forget_card(user_id)
+        await query.answer()
+        if query.message:
+            try:
+                await query.message.delete()
+            except Exception:
+                await query.message.edit_reply_markup(reply_markup=None)
+
+    # ----------------------------------------------------------------------
+    # 6. ПРИЁМ ТИКЕТА ПОЛЬЗОВАТЕЛЯ (СТРОГИЙ ФИЛЬТР! Никакого голого router.message)
+    # ----------------------------------------------------------------------
+    if enable_support:
+        @router.message(SupportTicketActiveFilter(pending, domain_labels=domain_labels))
+        async def handle_user_support_ticket(message: types.Message):
+            user_id = message.from_user.id if message.from_user else 0
+            pending.clear(user_id)
+
+            if not support_chat_id:
+                await message.answer(
+                    "⚠️ Служба поддержки временно недоступна (чат поддержки не настроен)."
+                )
+                return
+
+            copied_id = await send_user_report_to_support(
+                bot=message.bot,
+                support_chat_id=support_chat_id,
+                user_message=message,
+                thread_store=threads,
+                project_label=project_label,
             )
-            flash_msg = await message.answer(flash_text, parse_mode="HTML")
+            if copied_id:
+                # Чек тикета НЕ должен быть новым носителем клавиатуры
+                await message.answer(
+                    "✅ <b>Ваше сообщение передано в службу поддержки.</b>\n"
+                    "Мы ответим вам прямо в этот диалог.",
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer(
+                    "⚠️ Не удалось отправить сообщение (возможно, превышен лимит активных обращений без ответа)."
+                )
 
-            # Пауза 3.0 секунды
-            await asyncio.sleep(3.0)
-
-            # Шаг 2: Бесшовная замена на официальное приветствие с правилами
-            main_text = (
-                f"👋 <b>Добро пожаловать в {project_name}!</b>\n\n"
-                f"Я провожу глубокую аналитику <b>Telegram-каналов</b>, личных текстов "
-                f"или <b>диалогов двух человек</b> на предмет психотипа, эмоций, скрытых мотивов и манипуляций.\n\n"
-                f"📌 <b>Как начать анализ:</b>\n"
-                f"• Отправьте ссылку на открытый канал (например, <code>@channel</code>).\n"
-                f"• Или загрузите экспорт переписки/канала в формате <b>JSON</b> или <b>TXT</b>.\n\n"
-                f"⚖️ <i>Отправляя данные, вы соглашаетесь с правилами сервиса (152-ФЗ). "
-                f"Тексты обрабатываются в оперативной памяти и не сохраняются на диск. "
-                f"Отчёт носит вероятностный характер.</i>"
+    # ----------------------------------------------------------------------
+    # 7. ОТВЕТ АДМИНИСТРАТОРА (СТРОГО внутри support_chat_id с Reply)
+    # ----------------------------------------------------------------------
+    if enable_support and support_chat_id:
+        @router.message(F.chat.id == support_chat_id, F.reply_to_message)
+        async def handle_admin_reply_message(message: types.Message):
+            success, status = await deliver_support_reply_to_user(
+                bot=message.bot,
+                admin_reply_message=message,
+                thread_store=threads,
             )
-
-            menu_kb = build_main_menu_keyboard()
-            await edit_or_send(flash_msg, main_text, reply_markup=menu_kb, parse_mode="HTML")
-
-        finally:
-            tracker.release(user_id, current_task)
-
-    # ----------------------------------------------------------------------
-    # 2. КНОПКА: [👤 Личный кабинет]
-    # ----------------------------------------------------------------------
-    @router.message(F.text.in_({BTN_CABINET, "Личный кабинет", "💼 Личный кабинет"}))
-    async def handle_cabinet_button(message: types.Message):
-        user_id = message.from_user.id if message.from_user else 0
-        current_task = asyncio.current_task()
-        if not tracker.should_process(user_id, "menu:cabinet", current_task):
-            return
-
-        try:
-            pending_store.clear(user_id)
-            user = message.from_user
-            username_str = f"@{user.username}" if (user and user.username) else "нет username"
-
-            # Закрываем предыдущий открытый инлайн-экран
-            await close_previous_user_screen(message.bot, user_id, message.message_id)
-
-            cabinet_text = (
-                f"💼 <b>Личный кабинет</b>\n\n"
-                f"👤 <b>Пользователь:</b> {username_str} (<code>{user_id}</code>)\n"
-                f"⭐ <b>Баланс Stars:</b> 15 Stars (доступно отчётов: 1)\n"
-                f"📅 <b>Статус аккаунта:</b> Активен\n\n"
-                f"📊 <b>Ваши последние анализы:</b>\n"
-                f"<i>История отчётов пуста. Отправьте файл или ссылку на канал для первого исследования.</i>"
-            )
-
-            inline_kb = build_cabinet_inline_keyboard(has_reports=False)
-            await message.answer(cabinet_text, reply_markup=inline_kb, parse_mode="HTML")
-
-        finally:
-            tracker.release(user_id, current_task)
-
-    # ----------------------------------------------------------------------
-    # 3. КНОПКА: [ℹ️ Info]
-    # ----------------------------------------------------------------------
-    @router.message(F.text.in_({BTN_INFO, "Info", "О сервисе", "ℹ️ О сервисе"}))
-    async def handle_info_button(message: types.Message):
-        user_id = message.from_user.id if message.from_user else 0
-        current_task = asyncio.current_task()
-        if not tracker.should_process(user_id, "menu:info", current_task):
-            return
-
-        try:
-            pending_store.clear(user_id)
-            await close_previous_user_screen(message.bot, user_id, message.message_id)
-
-            info_text = (
-                f"ℹ️ <b>О психолингвистическом комплексе</b>\n\n"
-                f"Сервис проводит фундаментальную многофакторную оценку речи:\n"
-                f"• <b>Личностный профиль:</b> Big Five (OCEAN), Юнгианские типы, Тёмная триада.\n"
-                f"• <b>Эмоциональный спектр:</b> RuBERT аффекты, 2D-проектор Рассела (VAD).\n"
-                f"• <b>Коммуникация:</b> Трансактный анализ PAC (Эрик Берн), Карпман.\n"
-                f"• <b>Речевая безопасность:</b> Аудит скрытого шантажа и токсичного контроля.\n\n"
-                f"Выберите интересующий раздел ниже:"
-            )
-
-            inline_kb = build_info_inline_keyboard(locale="ru")
-            await message.answer(info_text, reply_markup=inline_kb, parse_mode="HTML")
-
-        finally:
-            tracker.release(user_id, current_task)
-
-    # ----------------------------------------------------------------------
-    # 4. КНОПКА: [💬 Поддержка]
-    # ----------------------------------------------------------------------
-    @router.message(F.text.in_({BTN_SUPPORT, "Поддержка", "💬 Поддержка", "Report"}))
-    async def handle_support_button(message: types.Message):
-        user_id = message.from_user.id if message.from_user else 0
-        current_task = asyncio.current_task()
-        if not tracker.should_process(user_id, "menu:support", current_task):
-            return
-
-        try:
-            # Активируем режим ожидания ввода сообщения в поддержку
-            pending_store.set(
-                user_id,
-                PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE, origin_chat_id=message.chat.id),
-            )
-            await close_previous_user_screen(message.bot, user_id, message.message_id)
-
-            support_text = (
-                f"💬 <b>Служба поддержки ({project_name})</b>\n\n"
-                f"Напишите ваш вопрос или опишите проблему <b>прямо сюда в ответном сообщении</b>.\n\n"
-                f"Вы можете отправить текст, скриншот или голосовое сообщение — "
-                f"команда сервиса получит его и ответит вам прямо в этот диалог.\n\n"
-                f"<i>Для отмены просто нажмите любую кнопку в меню внизу.</i>"
-            )
-
-            inline_kb = build_support_inline_keyboard()
-            await message.answer(support_text, reply_markup=inline_kb, parse_mode="HTML")
-
-        finally:
-            tracker.release(user_id, current_task)
-
-    # ----------------------------------------------------------------------
-    # 5. ОТВЕТ АДМИНА В ЧАТЕ ПОДДЕРЖКИ (Reply в support_chat_id)
-    # ----------------------------------------------------------------------
-    @router.message(F.reply_to_message)
-    async def handle_admin_reply(message: types.Message):
-        # Если сообщение пришло из чата техподдержки и является ответом
-        if support_chat_id and message.chat.id == support_chat_id:
-            success, status = await deliver_support_reply_to_user(message.bot, message)
             if not success:
+                # Если ответ не привязан к тикету (админы переписываются между собой) — тишина
+                if status == "UNKNOWN_THREAD":
+                    return
+                # Уведомляем админа ТОЛЬКО при реальной ошибке доставки известному пользователю
                 await message.reply(f"⚠️ {status}")
             else:
-                await message.react([types.ReactionTypeEmoji(emoji="👍")])
-
-    # ----------------------------------------------------------------------
-    # 6. ВВОД СООБЩЕНИЯ ПОЛЬЗОВАТЕЛЯ В ПОДДЕРЖКУ (Followup)
-    # ----------------------------------------------------------------------
-    @router.message()
-    async def handle_user_followup(message: types.Message):
-        user_id = message.from_user.id if message.from_user else 0
-
-        # Если текст сообщения совпадает с кнопкой меню — игнорируем followup
-        if is_main_menu_button(message.text):
-            pending_store.clear(user_id)
-            return
-
-        pending = pending_store.get(user_id)
-        if pending and pending.kind == PendingInputKind.SUPPORT_MESSAGE:
-            pending_store.clear(user_id)
-            if support_chat_id:
-                sent_msg_id = await send_user_report_to_support(
-                    bot=message.bot,
-                    support_chat_id=support_chat_id,
-                    user_message=message,
-                    project_name=project_name,
-                )
-                if sent_msg_id:
-                    await message.answer(
-                        "✅ <b>Ваше сообщение передано в службу поддержки.</b>\n"
-                        "Мы ответим вам прямо в этот диалог, как только прочитаем.",
-                        parse_mode="HTML",
-                        reply_markup=build_main_menu_keyboard(),
-                    )
-                    return
-
-            await message.answer(
-                "⚠️ Не удалось отправить сообщение в поддержку (чат поддержки не сконфигурирован).\n"
-                "Пожалуйста, повторите попытку позже.",
-                reply_markup=build_main_menu_keyboard(),
-            )
-
-    # ----------------------------------------------------------------------
-    # 7. ИНЛАЙН-ОБРАБОТЧИКИ (Callbacks)
-    # ----------------------------------------------------------------------
-    @router.callback_query(F.data == "nav:close")
-    async def handle_nav_close(query: types.CallbackQuery):
-        await query.answer()
-        try:
-            await query.message.delete()
-        except Exception:
-            await query.message.edit_reply_markup(reply_markup=None)
-
-    @router.callback_query(F.data.startswith("info:lang:"))
-    async def handle_lang_switch(query: types.CallbackQuery):
-        lang = query.data.split(":")[-1]
-        await query.answer(f"Язык переключен на: {lang.upper()}")
-        # Перерисовываем Info на новом языке
-        new_text = (
-            "ℹ️ <b>About Profiling Framework</b>\n\n"
-            "The service conducts comprehensive psycholinguistic speech profiling."
-            if lang == "en" else
-            "ℹ️ <b>О психолингвистическом комплексе</b>\n\n"
-            "Сервис проводит фундаментальную оценку речи на базе валидированных научных шкал."
-        )
-        await edit_or_send(query, new_text, reply_markup=build_info_inline_keyboard(locale=lang), parse_mode="HTML")
+                try:
+                    await message.react([types.ReactionTypeEmoji(emoji="👍")])
+                except Exception:
+                    pass
 
     return router
