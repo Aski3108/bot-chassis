@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Aski3108" }]
 dependencies = [
     "aiogram>=3.13.0",
+    "loguru>=0.7.0",
 ]
 
 [project.optional-dependencies]

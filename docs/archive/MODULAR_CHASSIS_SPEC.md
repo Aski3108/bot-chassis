@@ -1,3 +1,5 @@
+> **Архив.** Канон v1: [../CHASSIS.md](../CHASSIS.md). Этот файл — чертёж реализации v2.10, не очередь работ.
+
 # Полная рама Bot Chassis — пакеты, Storage, порты
 
 **Статус:** Согласованная архитектурная спецификация (v2.10, правки по аудиту плана).  
@@ -495,7 +497,7 @@ class DefaultCabinetSlotsAdapter(CabinetSlotsProviderPort):
 * `/export [users|payments|gifts|all]` — **строго для роли `superadmin`** (защита персональных данных 152-ФЗ). Генерация CSV (`utf-8-sig`) и ZIP без внешних библиотек.
 * `/broadcast` — безопасная рассылка от имени бота (троттлинг 25 msg/s, Bot API, изолированный store в `admin/broadcast.py` без пересечения с `PendingInputKind` поддержки, предпросмотр, отчёт, кнопка экстренной остановки).
 * `/backup` — снапшот через публичный `StorageEngine.backup(dest_path)` (WAL-safe, без `BEGIN IMMEDIATE`) и отправка `.db` вызывающему суперадмину.
-* `/refund <user_id> <payment_id>` — официальный возврат Stars через `bot.refund_star_payment` с переводом талона в `cancelled` (только для платежей `telegram_stars`).
+* `/refund <charge_id>` или `/refund <user_id> <payment_id>` — официальный возврат Stars через `bot.refund_star_payment` с переводом талона в `cancelled` (только для платежей `telegram_stars`).
 * `/maintenance [on|off] [причина]` — управление рубильником.
 
 ### 6.3 Интерактивное досье пользователя (`/user <user_id>`) [Подтверждено архитектором]
@@ -523,6 +525,7 @@ class DefaultCabinetSlotsAdapter(CabinetSlotsProviderPort):
       `provider = 'admin_grant'`, `payment_id = f'admin:{uuid.uuid4()}'`, `telegram_payment_charge_id = payment_id`, `amount = 0`, `currency = 'XTR'`, `sku_code = 'admin_grant'`.
       Вызов `record_successful_payment(...)` $\rightarrow$ `(record, created)`. При `created is True` вызывается аудит.
   - `[ 👑 Роль Admin ]` / `[ 🚫 Снять Admin ]` (callback: `adm_usr:role_adm:{id}`) — **строго `superadmin`**.
+  - `[ « Главное меню админки ]` (callback: `adm_home`) — возврат на экран сводки `/admin`.
 * **Защита ролей с досье:** банить и снимать роль у **последнего** активного суперадмина запрещено (алерт `show_alert=True`). Теневой бан с карточки на любого `admin`/`superadmin` запрещён (`target_is_admin`), не только на последнего суперадмина.
 * **Обновление экрана:** После выполнения колбэка карточка обновляется на месте через `edit_text` (Reply-клавиатур здесь нет, `editMessageText` полностью валиден) + вызывается `send_admin_audit`.
 
@@ -570,7 +573,7 @@ class DefaultCabinetSlotsAdapter(CabinetSlotsProviderPort):
   - `is_flexible = False`
 * **Эмиссия талонов администратора (`sku_code='admin_grant'`):**
   - Не требует наличия в `config.skus` каталога; разрешена только через инлайн-досье `/user` для роли `superadmin`.
-* **Возврат платежей (`/refund <user_id> <payment_id>`):**
+* **Возврат платежей (`/refund <charge_id>` или `/refund <user_id> <payment_id>`):**
   - Официальный возврат Stars через Bot API `bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=payment_id)`.
   - Разрешён только для транзакций с `provider == 'telegram_stars'`. Админские талоны `admin_grant` туда не передаются.
 * **Поток обработки оплаты:**

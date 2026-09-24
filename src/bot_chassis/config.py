@@ -30,3 +30,4 @@ class BotChassisConfig:
     notify_on_payment: bool = True
     enable_language_switch: bool = False
     enable_referrals: bool = False
+    welcome_text: str | None = None  # HTML, как меню /start; None — текст шасси

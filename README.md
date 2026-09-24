@@ -2,11 +2,12 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![aiogram 3.13+](https://img.shields.io/badge/aiogram-3.13+-blue.svg)](https://docs.aiogram.dev/)
-[![Tests](https://img.shields.io/badge/tests-19%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Универсальное переносимое модульное шасси для Telegram-ботов на `aiogram v3`.**  
-> Единый UX, неисчезающие клавиатуры, рантайм-защита от гонок и повторных кликов, двусторонний мост поддержки, модульный каркас (Суб-шасси 1: Кнопки закрыто; Админка, Оплата Stars и Storage Contour в разработке).
+> Единый UX, неисчезающие клавиатуры, рантайм-защита от гонок и повторных кликов, двусторонний мост поддержки, админка, Telegram Stars, SQLite WAL.  
+> **Канон:** [docs/CHASSIS.md](docs/CHASSIS.md). История проектирования: [docs/archive/](docs/archive/README.md).
 
 ---
 
@@ -53,7 +54,7 @@
 - **Двусторонний мост поддержки:** Связка по композитному ключу `(chat_id, message_id) -> user_id`, фиксация карточки-шапки и копии сообщения пользователя. Атомарное сохранение на диск (`temp/support_threads.json` через `.tmp` и `os.replace`). Лимит активных тикетов без ответа (`max_active_tickets=5`). Полная тишина на служебную переписку админов между собой (`UNKNOWN_THREAD`).
 - **Слоты контента (Дырки, а не содержимое):** Карточки Кабинета и Info подключаются через внешние колбэки (`render_cabinet_callback`, `render_info_callback`) с автоматическим запоминанием в `UserScreenTracker`.
 
-### 2. Суб-шасси администрирования (Admin Chassis) — В РАЗРАБОТКЕ
+### 2. Суб-шасси администрирования (Admin Chassis) — ГОТОВО
 - **Двухуровневая модель доступа:**
   - `SUPER_ADMIN` (из конфига/env) — полный контроль, управление админами прямо из Telegram.
   - `ADMIN` — просмотр дашборда, поиск пользователя, прямая связь.
@@ -63,7 +64,7 @@
 - **Аварийный рубильник (Maintenance Mode):** Стопорит приём новых задач с вежливой заглушкой, не ломая навигацию.
 - **2-Step Confirmation:** Защита деструктивных операций одноразовыми токенами с подтверждением.
 
-### 3. Суб-шасси платежей (Payment Chassis) — В РАЗРАБОТКЕ
+### 3. Суб-шасси платежей (Payment Chassis) — ГОТОВО (v1, Telegram Stars)
 - **Выдача талона, а не прикладного анализа:** Шасси отвечает за инвойс Telegram Stars, предоплату (`pre_checkout_query`), успешную оплату (`successful_payment`) и идемпотентность по `telegram_payment_charge_id`.
 - **Каталог SKU:** Настраиваемый список услуг (`sku_code`, `stars_price`, `title`, `description`).
 - При успешной оплате шасси начисляет баланс / талон и уведомляет кузов: `on_purchase_completed(user_id, sku, bot_id)`. Что означает этот талон — решает кузов.
@@ -83,7 +84,28 @@
 
 ---
 
-## 📦 Быстрый старт (Шасси кнопок)
+## 📦 Быстрый старт
+
+Полная рама (кнопки + storage + админка + Stars):
+
+```python
+from aiogram import Bot
+from bot_chassis.config import BotChassisConfig
+from bot_chassis.factory import create_complete_chassis
+from bot_chassis.commands import register_button_chassis_startup
+
+async def main(bot: Bot) -> None:
+    config = BotChassisConfig(bot_id="demo", superadmin_ids=(108234567,))
+    chassis = await create_complete_chassis(bot, config, domain_rows=(("📊 Задачи",),))
+    register_button_chassis_startup(chassis.dp, bot)
+    await chassis.dp.start_polling(bot)
+```
+
+Эталон: `examples/run_complete_chassis.py`. Как цепляется кузов и порты — [docs/CHASSIS.md](docs/CHASSIS.md).
+
+Только кнопки (без БД и админки): `create_button_chassis_router` и `examples/run_example.py`. Этот пример не наращивать.
+
+### Только кнопки
 
 ```python
 import asyncio
@@ -126,7 +148,7 @@ if __name__ == "__main__":
 Сьют тестов шасси изолирован и не требует подключения к реальному Telegram Bot API:
 
 ```bash
-pytest tests/test_chassis.py -v
+pytest tests/ -v
 ```
 
-Текущий статус: **19 passed (100% GREEN)**.
+Полная рама: **80 passed**. Замороженные тесты кнопок: `pytest tests/test_chassis.py -v` (19 шт.).
