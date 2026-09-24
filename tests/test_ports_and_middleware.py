@@ -316,14 +316,14 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
             mw = ThrottlingMiddleware("bot_a")
             self.assertEqual(mw._bot_id, "bot_a")
             with patch.object(CallbackQuery, "answer", new_callable=AsyncMock) as answer:
-                for _ in range(4):
+                for _ in range(5):
                     self.assertEqual(await mw(handler, callback, {"event_from_user": user}), "ok")
-                self.assertEqual(calls["n"], 4)
+                self.assertEqual(calls["n"], 5)
                 self.assertIsNone(await mw(handler, callback, {"event_from_user": user}))
-                self.assertEqual(calls["n"], 4)
+                self.assertEqual(calls["n"], 5)
                 answer.assert_awaited_with("⚠️ Слишком часто! Пожалуйста, помедленнее.", show_alert=False)
                 self.assertEqual(await mw(handler, payment, {"event_from_user": user}), "ok")
-                self.assertEqual(calls["n"], 5)
+                self.assertEqual(calls["n"], 6)
                 self.assertIsNone(await mw(handler, callback, {"event_from_user": user}))
                 self.assertIn(("bot_a", 7), mw._hits)
 

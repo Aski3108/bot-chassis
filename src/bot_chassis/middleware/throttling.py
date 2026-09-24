@@ -1,4 +1,4 @@
-"""Скользящее окно 4 события/сек. pre_checkout и successful_payment не учитываются."""
+"""Скользящее окно 5 событий/сек. pre_checkout и successful_payment не учитываются."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import TelegramObject, Update
 
 _WINDOW_SECONDS = 1.0
-_LIMIT = 4
+_LIMIT = 5
 _GC_INTERVAL_SECONDS = 60.0
 _TOAST = "⚠️ Слишком часто! Пожалуйста, помедленнее."
 

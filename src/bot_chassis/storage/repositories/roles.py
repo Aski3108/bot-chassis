@@ -96,11 +96,18 @@ class RolesRepository:
                     DELETE FROM roles
                     WHERE rowid IN (
                         SELECT r.rowid FROM roles r
+                        JOIN users u ON u.bot_id = r.bot_id AND u.user_id = r.user_id
                         WHERE r.bot_id = ? AND r.user_id = ? AND r.role = 'superadmin'
                           AND (
-                            SELECT COUNT(*) FROM roles r2
-                            WHERE r2.bot_id = r.bot_id AND r2.role = 'superadmin'
-                          ) > 1
+                            u.is_banned = 1
+                            OR (
+                              SELECT COUNT(*) FROM roles r2
+                              JOIN users u2 ON u2.bot_id = r2.bot_id AND u2.user_id = r2.user_id
+                              WHERE r2.bot_id = r.bot_id
+                                AND r2.role = 'superadmin'
+                                AND u2.is_banned = 0
+                            ) > 1
+                          )
                     )
                     """,
                     (bot_id, user_id),

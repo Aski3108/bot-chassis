@@ -4,6 +4,7 @@ from .router import (
     BUY_UNAVAILABLE,
     MAINTENANCE_PAYMENT_ERROR,
     PAYLOAD_MISMATCH_ERROR,
+    PRE_CHECKOUT_INTERNAL_ERROR,
     SHADOW_PAYMENT_ERROR,
     create_payments_router,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "InvoiceError",
     "MAINTENANCE_PAYMENT_ERROR",
     "PAYLOAD_MISMATCH_ERROR",
+    "PRE_CHECKOUT_INTERNAL_ERROR",
     "SHADOW_PAYMENT_ERROR",
     "StarInvoice",
     "build_star_invoice",

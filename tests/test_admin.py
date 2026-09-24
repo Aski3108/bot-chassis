@@ -380,6 +380,15 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         await self._feed_text(100, "/revoke 16 admin", 8)
         self.assertFalse(await self.storage.roles.has_any_role("bot_a", 16, ("admin",)))
 
+    async def test_cannot_revoke_last_unbanned_superadmin_via_command(self) -> None:
+        await self._feed_text(100, "/grant 18 superadmin", 1)
+        await self.storage.users.set_ban("bot_a", 18, True, "blocked")
+        self.session.requests.clear()
+        await self._feed_text(100, "/revoke 100 superadmin", 2)
+        self.assertTrue(await self.storage.roles.has_any_role("bot_a", 100, ("superadmin",)))
+        self.assertIn(LAST_SUPERADMIN_ROLE, [item.text for item in self._named("SendMessage") if item.chat_id == 100])
+        self.assertFalse(any(item.chat_id == -100 for item in self._named("SendMessage")))
+
     async def test_role_commands_reject_bad_args_and_banned_actor(self) -> None:
         await self._feed_text(100, "/grant", 1)
         await self._feed_text(100, "/revoke 16", 2)

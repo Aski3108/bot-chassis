@@ -18,6 +18,7 @@ from bot_chassis.payments import (
     BUY_UNAVAILABLE,
     MAINTENANCE_PAYMENT_ERROR,
     PAYLOAD_MISMATCH_ERROR,
+    PRE_CHECKOUT_INTERNAL_ERROR,
     SHADOW_PAYMENT_ERROR,
     InvoiceError,
     build_star_invoice,
@@ -186,6 +187,40 @@ class TestPaymentGate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bad[0], "invalid_payload")
         self.consumer.on_voucher_issued.assert_not_awaited()
         self.assertTrue(any("Битый payload" in item.text for item in self._named("SendMessage")))
+
+    async def test_pre_checkout_answers_false_on_internal_error(self) -> None:
+        with patch(
+            "bot_chassis.payments.router._pre_checkout_decision",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("db down"),
+        ):
+            await self._pre_checkout(7, "sku:vip:7:abcd")
+        answers = self._answers()
+        self.assertEqual(len(answers), 1)
+        self.assertFalse(answers[0].ok)
+        self.assertEqual(answers[0].error_message, PRE_CHECKOUT_INTERNAL_ERROR)
+
+    async def test_broken_payload_without_user_alerts_and_skips_receipt(self) -> None:
+        payment = SuccessfulPayment(
+            currency="XTR",
+            total_amount=10,
+            invoice_payload="broken",
+            telegram_payment_charge_id="chg-orphan",
+            provider_payment_charge_id="prov-orphan",
+        )
+        message = Message(
+            message_id=1,
+            date=1,
+            chat=Chat(id=0, type="private"),
+            successful_payment=payment,
+        )
+        self._update_id += 1
+        await self.dp.feed_update(self.bot, Update(update_id=self._update_id, message=message))
+        self.assertEqual(await self._tx_count("chg-orphan"), 0)
+        self.consumer.on_voucher_issued.assert_not_awaited()
+        self.assertTrue(
+            any("Битый payload оплаты без пользователя" in item.text for item in self._named("SendMessage"))
+        )
 
     async def test_payment_alert_respects_notify_flag(self) -> None:
         quiet = BotChassisConfig(

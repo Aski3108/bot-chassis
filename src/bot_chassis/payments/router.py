@@ -13,6 +13,7 @@ from ..storage.repositories.transactions import VoucherRecord
 from .service import send_sku_invoice
 
 SHADOW_PAYMENT_ERROR = "Оплата временно недоступна"
+PRE_CHECKOUT_INTERNAL_ERROR = "Оплата временно недоступна"
 MAINTENANCE_PAYMENT_ERROR = "Сервис временно приостановлен."
 PAYLOAD_MISMATCH_ERROR = "Не удалось подтвердить заказ"
 BUY_UNAVAILABLE = "Этот товар недоступен"
@@ -50,6 +51,10 @@ def create_payments_router(
             await query.answer(ok=ok, error_message=error)
         except Exception:
             logger.exception("Не удалось ответить на pre_checkout")
+            try:
+                await query.answer(ok=False, error_message=PRE_CHECKOUT_INTERNAL_ERROR)
+            except Exception:
+                logger.exception("Не удалось отправить fallback-ответ на pre_checkout")
 
     @router.message(F.successful_payment)
     async def handle_successful_payment(message: Message) -> None:
@@ -62,6 +67,11 @@ def create_payments_router(
             payer = message.from_user
             if payer is None:
                 logger.error("successful_payment без пользователя и с битым payload")
+                await _notify_support(
+                    message.bot,
+                    config.support_chat_id,
+                    f"Битый payload оплаты без пользователя. charge={payment.telegram_payment_charge_id}",
+                )
                 return
             sku_code, user_id = "invalid_payload", payer.id
         else:

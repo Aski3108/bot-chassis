@@ -134,6 +134,19 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         ok, err = await self.storage.users.set_ban("bot_a", 102, True, "test")
         self.assertTrue(ok)
 
+    async def test_cannot_revoke_last_unbanned_superadmin(self) -> None:
+        await self.storage.roles.grant_role("bot_a", 101, "superadmin", granted_by=100)
+        ok, err = await self.storage.users.set_ban("bot_a", 101, True, "blocked")
+        self.assertTrue(ok)
+        ok, err = await self.storage.roles.revoke_role("bot_a", 100, "superadmin")
+        self.assertFalse(ok)
+        self.assertEqual(err, "last_superadmin")
+        self.assertTrue(await self.storage.roles.has_any_role("bot_a", 100, ("superadmin",)))
+        ok, err = await self.storage.roles.revoke_role("bot_a", 101, "superadmin")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertFalse(await self.storage.roles.has_any_role("bot_a", 101, ("superadmin",)))
+
     async def test_payment_idempotent_and_redeem(self) -> None:
         await self.storage.users.upsert_user("bot_a", 7)
         first, created = await self.storage.transactions.record_successful_payment(
