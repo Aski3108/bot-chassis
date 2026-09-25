@@ -64,6 +64,8 @@ class TransactionsRepository:
         voucher_id: Optional[str] = None,
         merchant_origin_bot_id: Optional[str] = None,
         merchant_telegram_bot_id: int = 0,
+        voucher_status: str = "issued",
+        redeemed_at: Optional[str] = None,
     ) -> tuple[VoucherRecord, bool]:
         """
         Insert paid+issued voucher. Telegram charge_id is unique within one
@@ -75,6 +77,7 @@ class TransactionsRepository:
         """
         resolved_payment_id = telegram_payment_charge_id if payment_id is None else payment_id
         resolved_merchant_origin = merchant_origin_bot_id or bot_id
+        resolved_redeemed_at = redeemed_at or (utc_now() if voucher_status != "issued" else None)
         new_voucher_id = voucher_id or str(uuid.uuid4())
 
         def _op(conn) -> tuple[VoucherRecord, bool]:
@@ -94,8 +97,8 @@ class TransactionsRepository:
                     bot_id, user_id, provider, payment_id, telegram_payment_charge_id,
                     provider_payment_charge_id, merchant_origin_bot_id,
                     merchant_telegram_bot_id, sku_code, amount, currency, status,
-                    voucher_id, voucher_status, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'issued', ?)
+                    voucher_id, voucher_status, redeemed_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?, ?)
                 """,
                 (
                     bot_id,
@@ -110,6 +113,8 @@ class TransactionsRepository:
                     amount,
                     currency,
                     new_voucher_id,
+                    voucher_status,
+                    resolved_redeemed_at,
                     utc_now(),
                 ),
             )
@@ -130,6 +135,7 @@ class TransactionsRepository:
         bot_id: str,
         payment_id: str,
         provider: str = "telegram_stars",
+        merchant_telegram_bot_id: int | None = None,
     ) -> tuple[bool, Optional[str]]:
         def _op(conn) -> tuple[bool, Optional[str]]:
             row = conn.execute(
@@ -137,8 +143,15 @@ class TransactionsRepository:
                 SELECT status, voucher_status, provider
                 FROM transactions
                 WHERE bot_id = ? AND provider = ? AND payment_id = ?
+                  AND (? IS NULL OR merchant_telegram_bot_id = ?)
                 """,
-                (bot_id, provider, payment_id),
+                (
+                    bot_id,
+                    provider,
+                    payment_id,
+                    merchant_telegram_bot_id,
+                    merchant_telegram_bot_id,
+                ),
             ).fetchone()
             if not row:
                 return False, "not_found"
@@ -151,8 +164,16 @@ class TransactionsRepository:
                 UPDATE transactions
                 SET status = 'refunded', voucher_status = 'cancelled', updated_at = ?
                 WHERE bot_id = ? AND provider = ? AND payment_id = ?
+                  AND (? IS NULL OR merchant_telegram_bot_id = ?)
                 """,
-                (utc_now(), bot_id, provider, payment_id),
+                (
+                    utc_now(),
+                    bot_id,
+                    provider,
+                    payment_id,
+                    merchant_telegram_bot_id,
+                    merchant_telegram_bot_id,
+                ),
             )
             return True, None
 

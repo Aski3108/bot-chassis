@@ -380,6 +380,14 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<script>", text)
         self.assertEqual(bot.send_message.await_args.kwargs["parse_mode"], "HTML")
 
+        bot.send_message = AsyncMock()
+        audit_first = ErrorAlertMiddleware(
+            BotChassisConfig(bot_id="bot_a", support_chat_id=-100, audit_chat_id=-200)
+        )
+        with patch.object(PreCheckoutQuery, "answer", new_callable=AsyncMock):
+            self.assertIsNone(await audit_first(boom, pre, {"bot": bot}))
+        self.assertEqual(bot.send_message.await_args.args[0], -200)
+
     async def test_user_activity_middleware_language_retention(self) -> None:
         await self.storage.users.upsert_user("bot_a", 9, language_code="en")
         await self.storage.users.set_language_code("bot_a", 9, "en")

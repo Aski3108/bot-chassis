@@ -188,6 +188,45 @@ class TestPaymentGate(unittest.IsolatedAsyncioTestCase):
         self.consumer.on_voucher_issued.assert_not_awaited()
         self.assertTrue(any("Битый payload" in item.text for item in self._named("SendMessage")))
 
+    async def test_network_payment_records_actual_merchant_and_donate_has_no_voucher(self) -> None:
+        network_config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.config.db_path,
+            support_chat_id=-100,
+            audit_chat_id=-200,
+            origin_bot_id="bpd",
+            skus=(
+                SkuItem("donate_50", "Поддержать", "Донат", 50, issues_voucher=False),
+            ),
+        )
+        self.dp = Dispatcher()
+        self.dp.include_router(
+            create_payments_router("bot_a", self.storage, network_config, self.consumer)
+        )
+
+        await self._paid(7, "sku:donate_50:7:abcd", "chg-donate", 50)
+
+        def _op(conn):
+            return conn.execute(
+                """
+                SELECT merchant_origin_bot_id, merchant_telegram_bot_id,
+                       voucher_status, redeemed_at
+                FROM transactions
+                WHERE bot_id = ? AND payment_id = ?
+                """,
+                ("bot_a", "chg-donate"),
+            ).fetchone()
+
+        row = await self.storage.engine.run(_op)
+        self.assertEqual(row["merchant_origin_bot_id"], "bpd")
+        self.assertEqual(int(row["merchant_telegram_bot_id"]), self.bot.id)
+        self.assertEqual(row["voucher_status"], "redeemed")
+        self.assertIsNotNone(row["redeemed_at"])
+        self.consumer.on_voucher_issued.assert_not_awaited()
+        alerts = self._named("SendMessage")
+        self.assertTrue(any(item.chat_id == -200 and "sku=donate_50" in item.text for item in alerts))
+        self.assertFalse(any(item.chat_id == -100 for item in alerts))
+
     async def test_pre_checkout_answers_false_on_internal_error(self) -> None:
         with patch(
             "bot_chassis.payments.router._pre_checkout_decision",

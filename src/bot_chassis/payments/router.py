@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from loguru import logger
 
-from ..config import BotChassisConfig
+from ..config import BotChassisConfig, resolved_origin
 from ..ports.payments import SkuVoucher, SkuVoucherConsumerPort
 from ..storage import Storage
 from ..storage.repositories.transactions import VoucherRecord
@@ -69,7 +69,7 @@ def create_payments_router(
                 logger.error("successful_payment без пользователя и с битым payload")
                 await _notify_support(
                     message.bot,
-                    config.support_chat_id,
+                    config.audit_chat_id or config.support_chat_id,
                     f"Битый payload оплаты без пользователя. charge={payment.telegram_payment_charge_id}",
                 )
                 return
@@ -77,6 +77,8 @@ def create_payments_router(
         else:
             sku_code, user_id = parsed
         await storage.users.upsert_user(bot_id, user_id)
+        sku = next((item for item in config.skus if item.sku_code == sku_code), None)
+        voucher_status = "redeemed" if sku is not None and not sku.issues_voucher else "issued"
         record, created = await storage.transactions.record_successful_payment(
             bot_id=bot_id,
             user_id=user_id,
@@ -87,17 +89,20 @@ def create_payments_router(
             payment_id=payment.telegram_payment_charge_id,
             provider_payment_charge_id=payment.provider_payment_charge_id,
             currency=payment.currency,
+            merchant_origin_bot_id=resolved_origin(config),
+            merchant_telegram_bot_id=message.bot.id,
+            voucher_status=voucher_status,
         )
         if not created:
             return
         if invalid:
             await _notify_support(
                 message.bot,
-                config.support_chat_id,
+                config.audit_chat_id or config.support_chat_id,
                 f"Битый payload оплаты. charge={payment.telegram_payment_charge_id}",
             )
             return
-        if voucher_consumer is not None:
+        if voucher_consumer is not None and record.voucher_status == "issued":
             try:
                 await voucher_consumer.on_voucher_issued(_voucher(record))
             except Exception:
@@ -105,7 +110,7 @@ def create_payments_router(
         if config.notify_on_payment:
             await _notify_support(
                 message.bot,
-                config.support_chat_id,
+                config.audit_chat_id or config.support_chat_id,
                 f"Оплата {payment.total_amount} {payment.currency}. sku={sku_code} user_id={user_id} charge={payment.telegram_payment_charge_id}",
             )
 

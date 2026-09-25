@@ -20,7 +20,7 @@ from aiogram.types import (
 from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
-from ..config import BotChassisConfig
+from ..config import BotChassisConfig, resolved_origin
 from ..storage import Storage
 from .audit import send_admin_audit
 from .broadcast import register_broadcast
@@ -58,6 +58,7 @@ REFUND_NOT_STARS = "Возврат доступен только для плат
 REFUND_ALREADY = "Платёж уже возвращён"
 REFUND_NO_CHARGE = "У платежа нет идентификатора Stars"
 REFUND_REJECTED = "Telegram не подтвердил возврат"
+REFUND_OTHER_BOT = "Платёж принял другой бот; откройте /refund в нём"
 MAINTENANCE_USAGE = "Формат: /maintenance [on|off] [причина]"
 
 
@@ -307,11 +308,20 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         else:
             await _reply(message, REFUND_USAGE)
             return
-        row = await _find_payment(storage, bot_id, target_id, query)
+        row = await _find_payment(storage, bot_id, target_id, query, message.bot.id)
         if row is None:
             await _reply(message, REFUND_NOT_FOUND)
             return
-        canon_user_id, canon_payment_id, canon_charge_id, provider, status, voucher_status = row
+        (
+            canon_user_id,
+            canon_payment_id,
+            canon_charge_id,
+            provider,
+            status,
+            voucher_status,
+            merchant_origin_bot_id,
+            merchant_telegram_bot_id,
+        ) = row
         if provider != "telegram_stars":
             await _reply(message, REFUND_NOT_STARS)
             return
@@ -320,6 +330,18 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             return
         if not canon_charge_id:
             await _reply(message, REFUND_NO_CHARGE)
+            return
+        if merchant_origin_bot_id != resolved_origin(config):
+            await send_admin_audit(
+                message.bot,
+                config,
+                "Несовпадение merchant origin при refund: "
+                f"stored={merchant_origin_bot_id or 'legacy'} "
+                f"current={resolved_origin(config)} payment_id={canon_payment_id}",
+            )
+        legacy_single_bot = merchant_telegram_bot_id == 0 and config.origin_bot_id is None
+        if not legacy_single_bot and merchant_telegram_bot_id != message.bot.id:
+            await _reply(message, REFUND_OTHER_BOT)
             return
         try:
             confirmed = await message.bot.refund_star_payment(
@@ -333,7 +355,10 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             await _reply(message, REFUND_REJECTED)
             return
         ok, err = await storage.transactions.mark_refunded(
-            bot_id, canon_payment_id, provider="telegram_stars"
+            bot_id,
+            canon_payment_id,
+            provider="telegram_stars",
+            merchant_telegram_bot_id=merchant_telegram_bot_id,
         )
         if not ok:
             await _reply(message, _refund_mark_error(err))
@@ -720,19 +745,30 @@ async def _send_backup(bot, storage: Storage, actor_id: int) -> None:
             logger.exception("Не удалось удалить временный снапшот")
 
 
-async def _find_payment(storage: Storage, bot_id: str, target_id: int | None, query: str):
+async def _find_payment(
+    storage: Storage,
+    bot_id: str,
+    target_id: int | None,
+    query: str,
+    current_telegram_bot_id: int,
+):
     def _op(conn):
         row = conn.execute(
             """
-            SELECT user_id, payment_id, telegram_payment_charge_id, provider, status, voucher_status
+            SELECT user_id, payment_id, telegram_payment_charge_id, provider,
+                   status, voucher_status, merchant_origin_bot_id,
+                   merchant_telegram_bot_id
             FROM transactions
             WHERE bot_id = ?
               AND (? IS NULL OR user_id = ?)
               AND (payment_id = ? OR telegram_payment_charge_id = ?)
-            ORDER BY CASE provider WHEN 'telegram_stars' THEN 0 ELSE 1 END, id DESC
+            ORDER BY
+              CASE WHEN merchant_telegram_bot_id = ? THEN 0 ELSE 1 END,
+              CASE provider WHEN 'telegram_stars' THEN 0 ELSE 1 END,
+              id DESC
             LIMIT 1
             """,
-            (bot_id, target_id, target_id, query, query),
+            (bot_id, target_id, target_id, query, query, current_telegram_bot_id),
         ).fetchone()
         if row is None:
             return None
@@ -743,6 +779,8 @@ async def _find_payment(storage: Storage, bot_id: str, target_id: int | None, qu
             row["provider"],
             row["status"],
             row["voucher_status"],
+            row["merchant_origin_bot_id"],
+            int(row["merchant_telegram_bot_id"]),
         )
 
     return await storage.engine.run(_op)

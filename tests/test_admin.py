@@ -52,6 +52,7 @@ from bot_chassis.admin.router import (
     REFUND_ALREADY,
     REFUND_NOT_FOUND,
     REFUND_NOT_STARS,
+    REFUND_OTHER_BOT,
     REFUND_USAGE,
     ROLE_NOT_FOUND,
     SHADOW_USAGE,
@@ -942,6 +943,94 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self._named("RefundStarPayment"))
         self.assertIn(REFUND_NOT_FOUND, [item.text for item in self._named("SendMessage") if item.chat_id == 14])
 
+    async def test_network_refund_scopes_actual_bot_and_audits_origin_mismatch(self) -> None:
+        network_config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+            origin_bot_id="bpd",
+        )
+        self.dp = Dispatcher()
+        self.dp.include_router(create_admin_router("bot_a", self.storage, network_config))
+        await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=15,
+            sku_code="vip",
+            amount=10,
+            telegram_payment_charge_id="chg-shared-current",
+            payment_id="pay-shared",
+            merchant_origin_bot_id="wrong-origin",
+            merchant_telegram_bot_id=self.bot.id,
+        )
+        await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=15,
+            sku_code="vip",
+            amount=10,
+            telegram_payment_charge_id="chg-shared-foreign",
+            payment_id="pay-shared",
+            merchant_origin_bot_id="adhd",
+            merchant_telegram_bot_id=999999,
+        )
+
+        await self._feed_text(14, "/refund 15 pay-shared", 1)
+        calls = self._named("RefundStarPayment")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].telegram_payment_charge_id, "chg-shared-current")
+        self.assertEqual(
+            await self._merchant_payment_state("pay-shared", self.bot.id),
+            ("refunded", "cancelled"),
+        )
+        self.assertEqual(
+            await self._merchant_payment_state("pay-shared", 999999),
+            ("paid", "issued"),
+        )
+        self.assertTrue(
+            any(
+                item.chat_id == -100 and "Несовпадение merchant origin" in item.text
+                for item in self._named("SendMessage")
+            )
+        )
+
+        await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=15,
+            sku_code="vip",
+            amount=10,
+            telegram_payment_charge_id="chg-foreign-only",
+            payment_id="pay-foreign-only",
+            merchant_origin_bot_id="adhd",
+            merchant_telegram_bot_id=999999,
+        )
+        self.session.requests.clear()
+        await self._feed_text(14, "/refund 15 pay-foreign-only", 2)
+        self.assertFalse(self._named("RefundStarPayment"))
+        self.assertIn(
+            REFUND_OTHER_BOT,
+            [item.text for item in self._named("SendMessage") if item.chat_id == 14],
+        )
+        self.assertEqual(
+            await self._merchant_payment_state("pay-foreign-only", 999999),
+            ("paid", "issued"),
+        )
+
+        await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=15,
+            sku_code="vip",
+            amount=10,
+            telegram_payment_charge_id="chg-legacy-network",
+            payment_id="pay-legacy-network",
+        )
+        self.session.requests.clear()
+        await self._feed_text(14, "/refund 15 pay-legacy-network", 3)
+        self.assertFalse(self._named("RefundStarPayment"))
+        self.assertIn(
+            REFUND_OTHER_BOT,
+            [item.text for item in self._named("SendMessage") if item.chat_id == 14],
+        )
+
     async def test_dossier_home_returns_to_admin_screen(self) -> None:
         panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="dossier")
         await self._feed_callback(14, "adm_home", 1, panel)
@@ -958,6 +1047,26 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
                 WHERE bot_id = ? AND provider = ? AND payment_id = ?
                 """,
                 ("bot_a", provider, payment_id),
+            ).fetchone()
+            if row is None:
+                return None
+            return row["status"], row["voucher_status"]
+
+        return await self.storage.engine.run(_op)
+
+    async def _merchant_payment_state(
+        self,
+        payment_id: str,
+        merchant_telegram_bot_id: int,
+    ) -> tuple[str, str] | None:
+        def _op(conn):
+            row = conn.execute(
+                """
+                SELECT status, voucher_status FROM transactions
+                WHERE bot_id = ? AND provider = 'telegram_stars'
+                  AND payment_id = ? AND merchant_telegram_bot_id = ?
+                """,
+                ("bot_a", payment_id, merchant_telegram_bot_id),
             ).fetchone()
             if row is None:
                 return None
