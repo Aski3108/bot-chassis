@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import tempfile
@@ -188,6 +189,46 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(err, "already_redeemed")
         self.assertEqual(len(await self.storage.transactions.get_active_vouchers("bot_a", 7)), 0)
 
+    async def test_same_payment_id_is_distinct_for_different_telegram_bots(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 7)
+        first, first_created = await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=7,
+            telegram_payment_charge_id="same-charge",
+            sku_code="audit",
+            amount=50,
+            merchant_origin_bot_id="bpd",
+            merchant_telegram_bot_id=101,
+        )
+        second, second_created = await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=7,
+            telegram_payment_charge_id="same-charge",
+            sku_code="audit",
+            amount=50,
+            merchant_origin_bot_id="adhd",
+            merchant_telegram_bot_id=202,
+        )
+        repeated, repeated_created = await self.storage.transactions.record_successful_payment(
+            bot_id="bot_a",
+            user_id=7,
+            telegram_payment_charge_id="same-charge",
+            sku_code="audit",
+            amount=50,
+            merchant_origin_bot_id="bpd",
+            merchant_telegram_bot_id=101,
+        )
+
+        self.assertTrue(first_created)
+        self.assertTrue(second_created)
+        self.assertFalse(repeated_created)
+        self.assertNotEqual(first.voucher_id, second.voucher_id)
+        self.assertEqual(first.voucher_id, repeated.voucher_id)
+        self.assertEqual(first.merchant_origin_bot_id, "bpd")
+        self.assertEqual(first.merchant_telegram_bot_id, 101)
+        self.assertEqual(second.merchant_origin_bot_id, "adhd")
+        self.assertEqual(second.merchant_telegram_bot_id, 202)
+
     async def test_gift_invariants(self) -> None:
         ok, err = await self.storage.subscriptions.grant_gift_access(
             "bot_a", 50, granted_by=100, days=None
@@ -248,10 +289,15 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
 
     async def test_support_threads_repo_does_not_touch_json_store(self) -> None:
         await self.storage.users.upsert_user("bot_a", 9)
-        await self.storage.support_threads.register_thread("bot_a", -100, 1, 9)
-        await self.storage.support_threads.register_thread("bot_a", -100, 2, 9)
+        await self.storage.support_threads.register_thread(
+            "bot_a", -100, 1, 9, "bpd", 101, "ticket-1", "header"
+        )
+        await self.storage.support_threads.register_thread(
+            "bot_a", -100, 2, 9, "bpd", 101, "ticket-1", "copy"
+        )
         self.assertEqual(await self.storage.support_threads.resolve_user("bot_a", -100, 1), 9)
         self.assertIsNone(await self.storage.support_threads.resolve_user("bot_b", -100, 1))
+        self.assertEqual(await self.storage.support_threads.count_open_headers("bot_a", 9), 1)
         changed = await self.storage.support_threads.mark_answered("bot_a", 9)
         self.assertEqual(changed, 2)
         self.assertEqual(DEFAULT_SUPPORT_PERSISTENCE_PATH, os.path.join("temp", "support_threads.json"))
@@ -460,14 +506,16 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
             tx = conn.execute(
                 """
-                SELECT provider, payment_id, telegram_payment_charge_id, amount
+                SELECT provider, payment_id, telegram_payment_charge_id, amount,
+                       merchant_origin_bot_id, merchant_telegram_bot_id
                 FROM transactions
                 WHERE voucher_id = 'v-old'
                 """
             ).fetchone()
-            return user_cols, tx_cols, index, tx
+            unique_indexes = _unique_index_columns(conn, "transactions")
+            return user_cols, tx_cols, index, tx, unique_indexes
 
-        user_cols, tx_cols, index, tx = await engine.run(_inspect)
+        user_cols, tx_cols, index, tx, unique_indexes = await engine.run(_inspect)
         self.assertIn("traffic_source", user_cols)
         self.assertIn("is_shadow_banned", user_cols)
         self.assertIsNotNone(index)
@@ -477,6 +525,12 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tx["payment_id"], "chg-old")
         self.assertEqual(tx["telegram_payment_charge_id"], "chg-old")
         self.assertEqual(int(tx["amount"]), 50)
+        self.assertEqual(tx["merchant_origin_bot_id"], "bot_a")
+        self.assertEqual(int(tx["merchant_telegram_bot_id"]), 0)
+        self.assertIn(
+            ("bot_id", "provider", "merchant_telegram_bot_id", "payment_id"),
+            unique_indexes,
+        )
 
         user = await UsersRepository(engine).get_user("bot_a", 7)
         self.assertEqual(user.language_code, "en")
@@ -494,6 +548,35 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(created)
         self.assertEqual(record.voucher_id, "v-old")
         self.assertEqual(record.payment_id, "chg-old")
+        self.assertEqual(record.merchant_origin_bot_id, "bot_a")
+        self.assertEqual(record.merchant_telegram_bot_id, 0)
+
+    async def test_clean_and_concurrent_initialize_are_idempotent(self) -> None:
+        path = os.path.join(self._tmp.name, "concurrent.db")
+        first = StorageEngine(path)
+        second = StorageEngine(path)
+
+        await asyncio.gather(first.initialize(), second.initialize())
+        await first.initialize()
+
+        def _inspect(conn):
+            tx_cols = {row[1] for row in conn.execute("PRAGMA table_info(transactions)")}
+            thread_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(support_threads)")
+            }
+            return tx_cols, thread_cols, _unique_index_columns(conn, "transactions")
+
+        tx_cols, thread_cols, unique_indexes = await first.run(_inspect)
+        self.assertIn("merchant_origin_bot_id", tx_cols)
+        self.assertIn("merchant_telegram_bot_id", tx_cols)
+        self.assertTrue(
+            {"origin_bot_id", "origin_telegram_bot_id", "ticket_id", "message_role"}
+            <= thread_cols
+        )
+        self.assertIn(
+            ("bot_id", "provider", "merchant_telegram_bot_id", "payment_id"),
+            unique_indexes,
+        )
 
     async def test_backup_keeps_source_readable(self) -> None:
         await self.storage.users.upsert_user("bot_a", 42, username="backup_user")
@@ -526,6 +609,21 @@ def _transaction_row(engine, bot_id: str, payment_id: str, provider: str = "tele
         return await engine.run(_op)
 
     return _read()
+
+
+def _unique_index_columns(conn: sqlite3.Connection, table: str) -> set[tuple[str, ...]]:
+    result: set[tuple[str, ...]] = set()
+    for row in conn.execute(f"PRAGMA index_list({table})"):
+        if not int(row[2]):
+            continue
+        index_name = str(row[1]).replace('"', '""')
+        result.add(
+            tuple(
+                item[2]
+                for item in conn.execute(f'PRAGMA index_info("{index_name}")')
+            )
+        )
+    return result
 
 
 if __name__ == "__main__":

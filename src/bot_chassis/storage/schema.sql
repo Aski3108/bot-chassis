@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     payment_id TEXT NOT NULL,                       -- charge_id / invoice_id
     telegram_payment_charge_id TEXT,                -- Алиас для совместимости со Stars
     provider_payment_charge_id TEXT,
+    merchant_origin_bot_id TEXT NOT NULL DEFAULT '', -- Логическое имя процесса, принявшего платёж
+    merchant_telegram_bot_id INTEGER NOT NULL DEFAULT 0, -- Фактический Telegram bot.id
     sku_code TEXT NOT NULL,                         -- Артикул из BotChassisConfig.skus
     amount INTEGER NOT NULL,                        -- Внимание: INTEGER minor-units (целые Stars, копейки RUB). Никаких REAL!
     currency TEXT NOT NULL DEFAULT 'XTR',           -- 'XTR', 'RUB', 'USDT'
@@ -48,7 +50,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     redeemed_at TEXT,                               -- Дата погашения талона кузовом
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (bot_id, provider, payment_id),
+    UNIQUE (bot_id, provider, merchant_telegram_bot_id, payment_id),
     FOREIGN KEY (bot_id, user_id) REFERENCES users(bot_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_tx_bot_user ON transactions(bot_id, user_id);
@@ -80,6 +82,10 @@ CREATE TABLE IF NOT EXISTS support_threads (
     support_chat_id INTEGER NOT NULL,
     support_message_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
+    origin_bot_id TEXT NOT NULL DEFAULT '',
+    origin_telegram_bot_id INTEGER NOT NULL DEFAULT 0,
+    ticket_id TEXT NOT NULL DEFAULT '',
+    message_role TEXT NOT NULL DEFAULT 'header', -- 'header' | 'copy'
     ticket_status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'answered' | 'closed'
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

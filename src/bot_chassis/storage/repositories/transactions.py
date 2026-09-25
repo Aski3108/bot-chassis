@@ -1,4 +1,4 @@
-"""Чеки Stars: идемпотентность по (bot_id, provider, payment_id), погашение и рефанд."""
+"""Чеки Stars: идемпотентность с учётом merchant bot, погашение и рефанд."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ class VoucherRecord:
     provider: str
     payment_id: str
     redeemed_at: Optional[str] = None
+    merchant_origin_bot_id: str = ""
+    merchant_telegram_bot_id: int = 0
 
 
 def _row_to_voucher(row) -> VoucherRecord:
@@ -39,6 +41,8 @@ def _row_to_voucher(row) -> VoucherRecord:
         provider=row["provider"],
         payment_id=row["payment_id"],
         redeemed_at=row["redeemed_at"],
+        merchant_origin_bot_id=row["merchant_origin_bot_id"],
+        merchant_telegram_bot_id=int(row["merchant_telegram_bot_id"]),
     )
 
 
@@ -58,21 +62,29 @@ class TransactionsRepository:
         provider_payment_charge_id: Optional[str] = None,
         currency: str = "XTR",
         voucher_id: Optional[str] = None,
+        merchant_origin_bot_id: Optional[str] = None,
+        merchant_telegram_bot_id: int = 0,
     ) -> tuple[VoucherRecord, bool]:
         """
-        Insert paid+issued voucher. Repeat (bot_id, provider, payment_id) returns the existing row.
+        Insert paid+issued voucher. Telegram charge_id is unique within one
+        Telegram bot, not globally across multiple bot tokens.
+
+        Repeat (bot_id, provider, merchant Telegram bot, payment_id) returns
+        the existing row.
         Second value is True iff this call created the row.
         """
         resolved_payment_id = telegram_payment_charge_id if payment_id is None else payment_id
+        resolved_merchant_origin = merchant_origin_bot_id or bot_id
         new_voucher_id = voucher_id or str(uuid.uuid4())
 
         def _op(conn) -> tuple[VoucherRecord, bool]:
             existing = conn.execute(
                 """
                 SELECT * FROM transactions
-                WHERE bot_id = ? AND provider = ? AND payment_id = ?
+                WHERE bot_id = ? AND provider = ?
+                  AND merchant_telegram_bot_id = ? AND payment_id = ?
                 """,
-                (bot_id, provider, resolved_payment_id),
+                (bot_id, provider, merchant_telegram_bot_id, resolved_payment_id),
             ).fetchone()
             if existing:
                 return _row_to_voucher(existing), False
@@ -80,9 +92,10 @@ class TransactionsRepository:
                 """
                 INSERT INTO transactions (
                     bot_id, user_id, provider, payment_id, telegram_payment_charge_id,
-                    provider_payment_charge_id, sku_code, amount, currency, status,
+                    provider_payment_charge_id, merchant_origin_bot_id,
+                    merchant_telegram_bot_id, sku_code, amount, currency, status,
                     voucher_id, voucher_status, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'issued', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'issued', ?)
                 """,
                 (
                     bot_id,
@@ -91,6 +104,8 @@ class TransactionsRepository:
                     resolved_payment_id,
                     telegram_payment_charge_id,
                     provider_payment_charge_id,
+                    resolved_merchant_origin,
+                    merchant_telegram_bot_id,
                     sku_code,
                     amount,
                     currency,
@@ -101,9 +116,10 @@ class TransactionsRepository:
             row = conn.execute(
                 """
                 SELECT * FROM transactions
-                WHERE bot_id = ? AND provider = ? AND payment_id = ?
+                WHERE bot_id = ? AND provider = ?
+                  AND merchant_telegram_bot_id = ? AND payment_id = ?
                 """,
-                (bot_id, provider, resolved_payment_id),
+                (bot_id, provider, merchant_telegram_bot_id, resolved_payment_id),
             ).fetchone()
             return _row_to_voucher(row), True
 

@@ -17,18 +17,49 @@ class SupportThreadsRepository:
         support_chat_id: int,
         support_message_id: int,
         user_id: int,
+        origin_bot_id: str | None = None,
+        origin_telegram_bot_id: int = 0,
+        ticket_id: str = "",
+        message_role: str = "header",
     ) -> None:
         def _op(conn) -> None:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO support_threads (
-                    bot_id, support_chat_id, support_message_id, user_id, ticket_status, updated_at
-                ) VALUES (?, ?, ?, ?, 'open', ?)
+                    bot_id, support_chat_id, support_message_id, user_id,
+                    origin_bot_id, origin_telegram_bot_id, ticket_id,
+                    message_role, ticket_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
                 """,
-                (bot_id, support_chat_id, support_message_id, user_id, utc_now()),
+                (
+                    bot_id,
+                    support_chat_id,
+                    support_message_id,
+                    user_id,
+                    origin_bot_id or bot_id,
+                    origin_telegram_bot_id,
+                    ticket_id,
+                    message_role,
+                    utc_now(),
+                ),
             )
 
         await self._engine.run(_op)
+
+    async def count_open_headers(self, bot_id: str, user_id: int) -> int:
+        def _op(conn) -> int:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM support_threads
+                WHERE bot_id = ? AND user_id = ?
+                  AND ticket_status = 'open' AND message_role = 'header'
+                """,
+                (bot_id, user_id),
+            ).fetchone()
+            return int(row["total"])
+
+        return await self._engine.run(_op)
 
     async def resolve_user(
         self,

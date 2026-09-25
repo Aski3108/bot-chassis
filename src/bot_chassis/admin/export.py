@@ -20,6 +20,7 @@ ORDER BY user_id
 """
 _PAYMENTS_SQL = """
 SELECT id, user_id, provider, payment_id, telegram_payment_charge_id,
+       merchant_origin_bot_id, merchant_telegram_bot_id,
        sku_code, amount, currency, status, voucher_id, voucher_status,
        redeemed_at, created_at
 FROM transactions
