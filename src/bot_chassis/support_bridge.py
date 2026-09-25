@@ -21,6 +21,8 @@ from aiogram import Bot, types
 from aiogram.exceptions import TelegramForbiddenError
 from loguru import logger
 
+from .storage.sqlite_support_thread_store import TicketLimitExceeded
+
 DEFAULT_SUPPORT_PERSISTENCE_PATH = os.path.join("temp", "support_threads.json")
 
 
@@ -151,12 +153,25 @@ async def send_user_report_to_support(
         )
 
         # 3. Регистрируем ОБА сообщения по ключу (chat_id, message_id)
-        thread_store.register(
-            chat_id=support_chat_id,
-            user_id=user_id,
-            header_msg_id=header_msg.message_id,
-            copied_msg_id=copied_msg.message_id,
-        )
+        try:
+            thread_store.register(
+                chat_id=support_chat_id,
+                user_id=user_id,
+                header_msg_id=header_msg.message_id,
+                copied_msg_id=copied_msg.message_id,
+            )
+        except TicketLimitExceeded:
+            for message_id in (copied_msg.message_id, header_msg.message_id):
+                try:
+                    await bot.delete_message(chat_id=support_chat_id, message_id=message_id)
+                except Exception as cleanup_error:
+                    logger.warning(
+                        f"Не удалось удалить незарегистрированную карточку {message_id}: {cleanup_error}"
+                    )
+            logger.warning(
+                f"⚠️ Лимит тикетов пользователя {user_id} сработал при атомарной регистрации."
+            )
+            return None
         logger.info(f"📨 Обращение от {user_id} доставлено в {support_chat_id} (header={header_msg.message_id}, copy={copied_msg.message_id})")
         return copied_msg.message_id
     except Exception as e:
@@ -178,12 +193,25 @@ async def deliver_support_reply_to_user(
     if not replied_to:
         return False, "UNKNOWN_THREAD"
 
-    target_user_id = thread_store.resolve_user(
-        chat_id=admin_reply_message.chat.id,
-        reply_to_message_id=replied_to.message_id,
-    )
-    if not target_user_id:
-        return False, "UNKNOWN_THREAD"
+    resolve_ticket = getattr(thread_store, "resolve_ticket", None)
+    target_ticket = None
+    if callable(resolve_ticket):
+        target_ticket = resolve_ticket(
+            chat_id=admin_reply_message.chat.id,
+            reply_to_message_id=replied_to.message_id,
+        )
+        if target_ticket is None:
+            return False, "UNKNOWN_THREAD"
+        if target_ticket.origin_telegram_bot_id != bot.id:
+            return False, "FOREIGN_ORIGIN"
+        target_user_id = target_ticket.user_id
+    else:
+        target_user_id = thread_store.resolve_user(
+            chat_id=admin_reply_message.chat.id,
+            reply_to_message_id=replied_to.message_id,
+        )
+        if not target_user_id:
+            return False, "UNKNOWN_THREAD"
 
     try:
         # 1. Шапка ответа
@@ -198,7 +226,10 @@ async def deliver_support_reply_to_user(
             from_chat_id=admin_reply_message.chat.id,
             message_id=admin_reply_message.message_id,
         )
-        thread_store.mark_answered(target_user_id)
+        if target_ticket is not None:
+            thread_store.mark_ticket_answered(target_ticket.ticket_id)
+        else:
+            thread_store.mark_answered(target_user_id)
         logger.info(f"📬 Ответ поддержки доставлен пользователю {target_user_id}.")
         return True, "Ответ успешно доставлен пользователю."
     except TelegramForbiddenError:
