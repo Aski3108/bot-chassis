@@ -286,6 +286,43 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<b>", audit[0].text)
         self.assertEqual(audit[0].parse_mode, "HTML")
 
+    async def test_extra_admin_rows_append_and_dispatch_under_chassis_acl(self) -> None:
+        class ExtraActions:
+            def __init__(self) -> None:
+                self.handle_callback = AsyncMock(return_value=True)
+
+            def home_rows(self):
+                return [[("♻️ Restart adhd", "adm_ops:restart:adhd")]]
+
+        extra = ExtraActions()
+        self.dp = Dispatcher()
+        self.dp.include_router(
+            create_admin_router("bot_a", self.storage, self.config, extra_actions=extra)
+        )
+        await self._feed_command(14, 201)
+        home = next(
+            item
+            for item in self._named("SendMessage")
+            if item.chat_id == 14 and "Админка" in item.text
+        )
+        callbacks = [
+            button.callback_data
+            for row in home.reply_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(callbacks[:3], [CB_MAINT, CB_EXPORT, CB_BROADCAST])
+        self.assertEqual(callbacks[3:], ["adm_ops:restart:adhd"])
+
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=14, type="private"),
+            from_user=_user(14),
+            text="admin",
+        )
+        await self._feed_callback(14, "adm_ops:restart:adhd", 202, panel)
+        extra.handle_callback.assert_awaited_once()
+
     async def test_export_button_is_superadmin_only(self) -> None:
         panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="admin")
         await self._feed_callback(14, CB_EXPORT, 1, panel)

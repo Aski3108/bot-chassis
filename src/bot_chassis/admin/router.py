@@ -6,6 +6,7 @@ import html
 import os
 import tempfile
 import uuid
+from typing import Sequence
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
@@ -22,6 +23,7 @@ from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from ..config import BotChassisConfig, resolved_origin
+from ..ports.admin_extra import ExtraAdminActions
 from ..storage import Storage
 from .audit import send_admin_audit
 from .broadcast import register_broadcast
@@ -63,7 +65,12 @@ REFUND_OTHER_BOT = "Платёж принял другой бот; открой�
 MAINTENANCE_USAGE = "Формат: /maintenance [on|off] [причина] или /maintenance bot_id on|off [причина]"
 
 
-def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig) -> Router:
+def create_admin_router(
+    bot_id: str,
+    storage: Storage,
+    config: BotChassisConfig,
+    extra_actions: ExtraAdminActions | None = None,
+) -> Router:
     router = Router(name="admin")
     staff = AdminRoleFilter(bot_id, storage.roles)
     root = SuperadminRoleFilter(bot_id, storage.roles)
@@ -73,7 +80,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         user = message.from_user
         if user is None or await _is_banned(storage, bot_id, user.id):
             return
-        text, markup = await _home(storage, bot_id)
+        text, markup = await _home(storage, bot_id, extra_actions)
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
     @router.message(Command("ban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
@@ -435,7 +442,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         state = "опущен" if turned_on else "снят"
         username = f" @{user.username}" if user.username else ""
         await send_admin_audit(call.bot, config, f"Рубильник {state}. user_id={user.id}{username}")
-        await _edit_home(call, storage, bot_id)
+        await _edit_home(call, storage, bot_id, extra_actions)
         await call.answer()
 
     @router.callback_query(F.data == CB_EXPORT, staff)
@@ -456,25 +463,47 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         if user is None or await _is_banned(storage, bot_id, user.id):
             await call.answer()
             return
-        await _edit_home(call, storage, bot_id)
+        await _edit_home(call, storage, bot_id, extra_actions)
         await call.answer()
+
+    if extra_actions is not None:
+        @router.callback_query(F.data.startswith("adm_ops:"), staff)
+        async def handle_extra_admin_action(call: CallbackQuery) -> None:
+            handled = await extra_actions.handle_callback(call)
+            if not handled:
+                await call.answer()
 
     register_broadcast(router, bot_id, storage, config, staff)
     return router
 
 
-def _home_keyboard(maintenance_on: bool) -> InlineKeyboardMarkup:
+def _home_keyboard(
+    maintenance_on: bool,
+    extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
+) -> InlineKeyboardMarkup:
     maint_label = "🔴 Переключить рубильник" if maintenance_on else "🟢 Переключить рубильник"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=maint_label, callback_data=CB_MAINT)],
-            [InlineKeyboardButton(text="📥 Выгрузка базы (Excel)", callback_data=CB_EXPORT)],
-            [InlineKeyboardButton(text="📢 Новая рассылка", callback_data=CB_BROADCAST)],
+    rows = [
+        [InlineKeyboardButton(text=maint_label, callback_data=CB_MAINT)],
+        [InlineKeyboardButton(text="📥 Выгрузка базы (Excel)", callback_data=CB_EXPORT)],
+        [InlineKeyboardButton(text="📢 Новая рассылка", callback_data=CB_BROADCAST)],
+    ]
+    for row in extra_rows or ():
+        buttons = [
+            InlineKeyboardButton(text=text, callback_data=callback_data)
+            for text, callback_data in row
         ]
+        if buttons:
+            rows.append(buttons)
+    return InlineKeyboardMarkup(
+        inline_keyboard=rows
     )
 
 
-async def _home(storage: Storage, bot_id: str) -> tuple[str, InlineKeyboardMarkup]:
+async def _home(
+    storage: Storage,
+    bot_id: str,
+    extra_actions: ExtraAdminActions | None = None,
+) -> tuple[str, InlineKeyboardMarkup]:
     total, banned, paid_sum, gifts, maintenance_on, reason = await _summary(storage, bot_id)
     lines = [
         "🛠 <b>Админка</b>",
@@ -486,14 +515,20 @@ async def _home(storage: Storage, bot_id: str) -> tuple[str, InlineKeyboardMarku
     ]
     if maintenance_on and reason:
         lines.append(html.escape(reason))
-    return "\n".join(lines), _home_keyboard(maintenance_on)
+    extra_rows = extra_actions.home_rows() if extra_actions is not None else ()
+    return "\n".join(lines), _home_keyboard(maintenance_on, extra_rows)
 
 
-async def _edit_home(call: CallbackQuery, storage: Storage, bot_id: str) -> None:
+async def _edit_home(
+    call: CallbackQuery,
+    storage: Storage,
+    bot_id: str,
+    extra_actions: ExtraAdminActions | None = None,
+) -> None:
     message = call.message
     if message is None or isinstance(message, InaccessibleMessage):
         return
-    text, markup = await _home(storage, bot_id)
+    text, markup = await _home(storage, bot_id, extra_actions)
     try:
         await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     except Exception:

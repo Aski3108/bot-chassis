@@ -90,12 +90,22 @@ def build_inline_keyboard(
 def build_support_prompt_keyboard(
     cancel_callback: str = CB_SUPPORT_CANCEL,
     cancel_label: str = "🔙 Отмена",
+    extra_rows: Sequence[Sequence[tuple[str, str]]] | None = None,
 ) -> InlineKeyboardMarkup:
     """Инлайн-клавиатура экрана ожидания ввода тикета поддержки (кнопка отмены)."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback)]
+    rows = [
+        [
+            InlineKeyboardButton(text=text, url=value)
+            if value.startswith(("http://", "https://", "tg://"))
+            else InlineKeyboardButton(text=text, callback_data=value)
+            for text, value in row
         ]
+        for row in (extra_rows or ())
+        if row
+    ]
+    rows.append([InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback)])
+    return InlineKeyboardMarkup(
+        inline_keyboard=rows
     )
 
 

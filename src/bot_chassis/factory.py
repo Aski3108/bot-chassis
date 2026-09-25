@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from aiogram import Bot, Dispatcher, Router
+from aiogram import F
+from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -19,6 +21,7 @@ from .localization import create_localization_router
 from .middleware import register_chassis_middlewares
 from .payments.router import create_payments_router
 from .ports.access import AccessPort, DefaultAccessAdapter
+from .ports.admin_extra import ExtraAdminActions
 from .ports.cabinet import CabinetSlotsProviderPort, DefaultCabinetSlotsAdapter, build_cabinet_renderer
 from .ports.payments import SkuVoucherConsumerPort, VoucherManagerPort, DefaultVoucherManagerAdapter
 from .ports.referrals import DefaultReferralAdapter, ReferralPort
@@ -42,6 +45,7 @@ class CompleteChassis:
     referrals: ReferralPort
     cabinet: CabinetSlotsProviderPort
     locale_cache: dict[int, str]
+    thread_store: object | None = None
 
 
 async def create_complete_chassis(
@@ -56,6 +60,11 @@ async def create_complete_chassis(
     *,
     vouchers_provider: VoucherManagerPort | None = None,
     referrals_provider: ReferralPort | None = None,
+    project_label: str = "Сервис",
+    render_info_callback=None,
+    extra_admin_actions: ExtraAdminActions | None = None,
+    thread_store=None,
+    extra_support_inline: Sequence[Sequence[tuple[str, str]]] | None = None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -77,7 +86,14 @@ async def create_complete_chassis(
     )
 
     if config.enable_admin:
-        dp.include_router(create_admin_router(config.bot_id, storage, config))
+        dp.include_router(
+            create_admin_router(
+                config.bot_id,
+                storage,
+                config,
+                extra_actions=extra_admin_actions,
+            )
+        )
     if config.enable_payments:
         dp.include_router(
             create_payments_router(config.bot_id, storage, config, voucher_consumer)
@@ -93,7 +109,18 @@ async def create_complete_chassis(
     )
     if domain_router is not None:
         dp.include_router(domain_router)
+    resolved_thread_store = thread_store
     if config.enable_buttons:
+        if resolved_thread_store is None:
+            resolved_thread_store = SupportThreadStore()
+        if extra_support_inline is None:
+            resolved_support_inline = tuple(
+                ((f"{sku.title} — {sku.stars_price} ⭐", f"buy_sku:{sku.sku_code}"),)
+                for sku in config.skus
+                if sku.sku_code.startswith("donate_")
+            )
+        else:
+            resolved_support_inline = extra_support_inline
         pending = PendingInputStore()
         screens = UserScreenTracker()
         dp.include_router(
@@ -109,7 +136,10 @@ async def create_complete_chassis(
                 task_tracker=ActiveTaskTracker(),
                 pending_store=pending,
                 screen_tracker=screens,
-                thread_store=SupportThreadStore(),
+                thread_store=resolved_thread_store,
+                project_label=project_label,
+                render_info_callback=render_info_callback,
+                extra_support_inline=resolved_support_inline,
             )
         )
 
@@ -124,6 +154,7 @@ async def create_complete_chassis(
         referrals=referrals,
         cabinet=cabinet,
         locale_cache=locale_cache,
+        thread_store=resolved_thread_store,
     )
 
 
@@ -136,7 +167,10 @@ def _create_start_router(
 ) -> Router:
     router = Router(name="chassis_start")
 
-    @router.message(Command("start", ignore_mention=True))
+    @router.message(
+        Command("start", ignore_mention=True),
+        F.chat.type == ChatType.PRIVATE,
+    )
     async def handle_start(message: Message) -> None:
         user_id = message.from_user.id if message.from_user else 0
         pending.clear(user_id)

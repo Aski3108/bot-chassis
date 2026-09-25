@@ -7,7 +7,7 @@ import os
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.session.base import BaseSession
@@ -21,6 +21,8 @@ from bot_chassis.middleware.error_monitor import ErrorAlertMiddleware
 from bot_chassis.middleware.throttling import ThrottlingMiddleware
 from bot_chassis.middleware.user_activity import UserActivityMiddleware
 from bot_chassis.storage import create_storage
+from bot_chassis.storage.sqlite_support_thread_store import SqliteSupportThreadStore
+from bot_chassis.support_bridge import SupportThreadStore
 
 
 class TestConfigCompatibility(unittest.TestCase):
@@ -105,6 +107,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(ours[2], UserActivityMiddleware)
         self.assertTrue(await chassis.storage.roles.has_any_role("bot_a", 100, ("superadmin",)))
         self.assertIs(chassis.locale_cache, ours[2]._locale_cache)
+        self.assertIsInstance(chassis.thread_store, SupportThreadStore)
 
         await chassis.storage.users.upsert_user("bot_a", 7, username="ann")
         slots = await chassis.cabinet.get_cabinet_slots("bot_a", 7)
@@ -193,6 +196,116 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         await chassis.dp.feed_update(self.bot, Update(update_id=1, message=message))
         sent = [item for item in self.session.requests if item.__class__.__name__ == "SendMessage"]
         self.assertTrue(any(item.text == "<b>Привет!</b>" for item in sent))
+
+    async def test_factory_keeps_json_default_and_accepts_explicit_sqlite_store(self) -> None:
+        config = BotChassisConfig(
+            bot_id="tenant",
+            origin_bot_id="bpd",
+            db_path=self.db_path,
+            support_chat_id=-100,
+            enable_admin=False,
+            enable_payments=False,
+        )
+        default_chassis = await create_complete_chassis(self.bot, config)
+        self.assertIsInstance(default_chassis.thread_store, SupportThreadStore)
+
+        explicit_store = SqliteSupportThreadStore(
+            self.db_path,
+            tenant_bot_id="tenant",
+            origin_bot_id="bpd",
+            origin_telegram_bot_id=self.bot.id,
+        )
+        explicit_chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            thread_store=explicit_store,
+        )
+        self.assertIs(explicit_chassis.thread_store, explicit_store)
+
+        explicit_store.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        foreign_session = _Session()
+        foreign_bot = Bot(token="654321:ABC", session=foreign_session)
+        group = Chat(id=-100, type="supergroup")
+        admin = User(id=14, is_bot=False, first_name="Admin")
+        replied_to = Message(
+            message_id=10,
+            date=1,
+            chat=group,
+            text="ticket",
+        )
+        reply = Message(
+            message_id=12,
+            date=1,
+            chat=group,
+            from_user=admin,
+            text="answer",
+            reply_to_message=replied_to,
+        )
+        await explicit_chassis.dp.feed_update(
+            foreign_bot,
+            Update(update_id=100, message=reply),
+        )
+        self.assertFalse(
+            any(item.__class__.__name__ == "SendMessage" for item in foreign_session.requests)
+        )
+        await foreign_bot.session.close()
+
+    async def test_factory_support_extras_and_commands_are_private(self) -> None:
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+            skus=(SkuItem("donate_50", "Поддержать", "Донат", 50, False),),
+        )
+        info_renderer = AsyncMock(return_value=None)
+        chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            project_label="Psybot",
+            render_info_callback=info_renderer,
+        )
+        user = User(id=7, is_bot=False, first_name="N")
+        support = Message(
+            message_id=1,
+            date=1,
+            chat=Chat(id=7, type="private"),
+            from_user=user,
+            text="/support",
+        )
+        await chassis.dp.feed_update(self.bot, Update(update_id=1, message=support))
+        support_card = next(
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "SendMessage" and "Служба поддержки" in item.text
+        )
+        callbacks = [
+            button.callback_data
+            for row in support_card.reply_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertIn("buy_sku:donate_50", callbacks)
+        self.assertIn("Psybot", support_card.text)
+
+        self.session.requests.clear()
+        for update_id, command in enumerate(("/start", "/menu", "/help", "/support"), 10):
+            group_message = Message(
+                message_id=update_id,
+                date=1,
+                chat=Chat(id=-100, type="supergroup"),
+                from_user=user,
+                text=command,
+            )
+            await chassis.dp.feed_update(
+                self.bot,
+                Update(update_id=update_id, message=group_message),
+            )
+        self.assertFalse(
+            any(
+                item.__class__.__name__ == "SendMessage" and item.chat_id == -100
+                for item in self.session.requests
+            )
+        )
 
 
 def _load_runner():

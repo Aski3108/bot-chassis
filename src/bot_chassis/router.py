@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 from typing import Optional, Callable, Awaitable, Sequence
 from aiogram import Router, types, F, Bot
+from aiogram.enums import ChatType
 from aiogram.filters import Command, Filter
 from loguru import logger
 
@@ -65,6 +66,8 @@ class SupportTicketActiveFilter(Filter):
     async def __call__(self, message: types.Message) -> bool:
         if not message.from_user:
             return False
+        if message.text and message.text.startswith("/"):
+            return False
         # Клик по любой кнопке меню (включая доменные «Ваши чаты») сбрасывает ввод
         if is_main_menu_button(message.text, domain_labels=self.domain_labels):
             self.store.clear(message.from_user.id)
@@ -89,6 +92,7 @@ def create_button_chassis_router(
     thread_store: Optional[SupportThreadStore] = None,
     project_label: str = "Сервис",
     default_locale: str = "ru",
+    extra_support_inline: Optional[Sequence[Sequence[tuple[str, str]]]] = None,
 ) -> Router:
     """
     Фабрика универсального роутера шасси кнопок.
@@ -99,7 +103,7 @@ def create_button_chassis_router(
     tracker = task_tracker or ActiveTaskTracker()
     pending = pending_store or PendingInputStore(ttl_seconds=900.0)
     screens = screen_tracker or UserScreenTracker()
-    threads = thread_store or SupportThreadStore()
+    threads = thread_store if thread_store is not None else SupportThreadStore()
 
     domain_labels = extract_domain_labels(domain_rows)
 
@@ -124,7 +128,7 @@ def create_button_chassis_router(
     # ----------------------------------------------------------------------
     # 1. КОМАНДА /menu: Восстановление нижней клавиатуры (НЕ УДАЛЯЕТСЯ!)
     # ----------------------------------------------------------------------
-    @router.message(Command("menu"))
+    @router.message(Command("menu"), F.chat.type == ChatType.PRIVATE)
     async def handle_cmd_menu(message: types.Message):
         user_id = message.from_user.id if message.from_user else 0
         pending.clear(user_id)
@@ -216,7 +220,7 @@ def create_button_chassis_router(
         async def handle_info(message: types.Message):
             await _open_info(message)
 
-        @router.message(Command("help"))
+        @router.message(Command("help"), F.chat.type == ChatType.PRIVATE)
         async def handle_cmd_help(message: types.Message):
             await _open_info(message)
 
@@ -247,7 +251,10 @@ def create_button_chassis_router(
                     f"команда получит его и ответит прямо сюда.\n\n"
                     f"<i>Для отмены нажмите кнопку ниже или выберите любой пункт меню.</i>"
                 )
-                prompt_kb = build_support_prompt_keyboard(cancel_callback=CB_SUPPORT_CANCEL)
+                prompt_kb = build_support_prompt_keyboard(
+                    cancel_callback=CB_SUPPORT_CANCEL,
+                    extra_rows=extra_support_inline,
+                )
                 sent = await message.answer(support_prompt, reply_markup=prompt_kb, parse_mode="HTML")
                 screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=CardClosePolicy.DELETE)
             finally:
@@ -257,7 +264,7 @@ def create_button_chassis_router(
         async def handle_support(message: types.Message):
             await _open_support(message)
 
-        @router.message(Command("support"))
+        @router.message(Command("support"), F.chat.type == ChatType.PRIVATE)
         async def handle_cmd_support(message: types.Message):
             await _open_support(message)
 
@@ -335,7 +342,7 @@ def create_button_chassis_router(
             )
             if not success:
                 # Если ответ не привязан к тикету (админы переписываются между собой) — тишина
-                if status == "UNKNOWN_THREAD":
+                if status in {"UNKNOWN_THREAD", "FOREIGN_ORIGIN"}:
                     return
                 # Уведомляем админа ТОЛЬКО при реальной ошибке доставки известному пользователю
                 await message.reply(f"⚠️ {status}")
