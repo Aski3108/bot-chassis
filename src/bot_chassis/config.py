@@ -37,3 +37,8 @@ class BotChassisConfig:
 
 def resolved_origin(config: BotChassisConfig) -> str:
     return config.origin_bot_id or config.bot_id
+
+
+def resolved_alert_chat_id(config: BotChassisConfig) -> int | None:
+    """Prefer the audit chat and preserve support as a compatibility fallback."""
+    return config.audit_chat_id or config.support_chat_id

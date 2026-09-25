@@ -4,7 +4,7 @@
 **Корень:** `C:\Python\bot_chassis`  
 **Пакет:** `src/bot_chassis`  
 **Платформа:** Python 3.10+ (разработка на 3.14), aiogram 3.13+, SQLite WAL  
-**Тесты:** `pytest tests/` — 80 зелёных, из них 19 кнопочных (`tests/test_chassis.py`) заморожены.
+**Тесты:** `pytest tests/`; кнопочный контракт `tests/test_chassis.py` заморожен.
 
 Это рабочий факт рамы: как подключить, что внутри открыто, что заглушка с портом, чего в v1 нет.  
 История проектирования лежит в [archive/](archive/README.md) и **не** является очередью работ.
@@ -64,6 +64,11 @@ async def main(bot: Bot) -> None:
         cabinet_provider=None,          # дефолтные слоты кабинета
         vouchers_provider=None,         # keyword-only, дефолтный адаптер
         referrals_provider=None,
+        project_label="Shop",
+        render_info_callback=None,
+        extra_admin_actions=None,
+        thread_store=None,               # None → legacy JSON; SQLite только явно
+        extra_support_inline=None,
     )
     register_button_chassis_startup(chassis.dp, bot)
     await chassis.dp.start_polling(bot)
@@ -123,6 +128,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `notify_on_payment` | `True` | Алерт об оплате |
 | `enable_language_switch` | `False` | Колбэк `core_lang:*` |
 | `enable_referrals` | `False` | `/start ref_<id>` и слот кабинета |
+| `origin_bot_id` | `None` | Логическое имя origin; `None` → значение `bot_id` |
 
 ---
 
@@ -142,6 +148,11 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `vouchers_provider` | `DefaultVoucherManagerAdapter` | Свой склад талонов |
 | `referrals_provider` | `DefaultReferralAdapter` | Своя рефералка |
 | `voucher_consumer` | **тишина** | Хук «талон выдан»; чек в БД всё равно пишется |
+| `project_label` | `"Сервис"` | Название проекта в карточке поддержки |
+| `render_info_callback` | `None` | Рендер кузовной карточки Info |
+| `extra_admin_actions` | `None` | Ряды `adm_ops:*` в общей админке |
+| `thread_store` | JSON `SupportThreadStore` | Явный общий SQLite-store для сети |
+| `extra_support_inline` | donate-SKU каталога | Дополнительные кнопки поддержки |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -150,7 +161,6 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 - `WorkGatePort` → `DefaultWorkGateAdapter`  
 - `AccessPort` → `DefaultAccessAdapter`  
 - Админ-роутер, платёжный роутер, middleware  
-- Карточка Info: фабрика **не** передаёт `render_info_callback` — кнопка Info без кузовного рендера молчит. Свой Info вешают на `create_button_chassis_router` или на `domain_router`.
 
 ### Порты: контракт кузова
 
@@ -171,11 +181,11 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 ### 5.1 Кнопки
 
-Постоянный `ReplyKeyboardMarkup`, команды `/menu` `/help` `/support`, синее меню через `register_button_chassis_startup`.  
+Постоянный `ReplyKeyboardMarkup`, приватные команды `/start` `/menu` `/help` `/support`, синее меню через `register_button_chassis_startup`.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин.  
 Клики: `ActiveTaskTracker`.  
-Мост поддержки: `SupportThreadStore` (JSON `temp/support_threads.json`). Таблица `support_threads` в SQLite **есть**, живой мост на неё ещё не переведён.
+Мост поддержки: JSON `SupportThreadStore` остаётся compatibility default. Для сети кузов явно передаёт `SqliteSupportThreadStore`; dual-write нет.
 
 ### 5.2 Storage
 
@@ -202,7 +212,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 Досье `adm_usr:*`, возврат `adm_home`.  
 Рассылка 25 msg/s, свой RAM-store (не FSM кнопок), общий `asyncio.Lock`.  
 Экспорт CSV/ZIP только суперадмину в ЛС. Бэкап ≤ 50 МБ через `FSInputFile`.  
-`/refund charge_id` или `/refund user_id payment_id`: сначала Bot API, потом `mark_refunded` по каноническому `payment_id`.
+Команды админки работают только в private. `/refund charge_id` или `/refund user_id payment_id`: запись сначала ограничивается фактическим Telegram bot ID, затем вызывается Bot API и `mark_refunded` по каноническому `payment_id`.
 
 ### 5.5 Платежи v1 (Stars)
 
@@ -210,6 +220,16 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 `admin_grant` и SKU вне каталога не продаются.  
 `pre_checkout`: рубильник, тень, сверка payload и каталога. Обычный бан → `ok=True`. Сбой решения всегда отвечает `ok=False`.  
 `successful_payment` всегда пишет чек (деньги уже сняты), в том числе при рубильнике и бане. Битый payload без пользователя чек не пишет, алерт в поддержку уходит.
+SKU с `issues_voucher=False` (например, донат) сохраняется сразу погашенным и не попадает в активные талоны.
+
+### 5.6 Сеть: tenant, origin и фактический бот
+
+- `bot_id` — общий tenant данных. Семь процессов одной сети используют одно значение и один SQLite-файл.
+- `origin_bot_id` — логическое имя конкретного бота; если не задано, равно `bot_id`.
+- Фактический Telegram bot ID берётся из токена во время выполнения. Платёж уникален по `(bot_id, provider, merchant_telegram_bot_id, payment_id)`.
+- В общей support-группе Reply доставляет только процесс origin-бота и закрывает только выбранный `ticket_id`; остальные процессы молчат.
+- `audit_chat_id` используется для аудита, а служебные алерты выбирают audit-or-support. Все семь ботов могут быть администраторами служебной группы.
+- Универсальная фабрика не угадывает сетевой режим: SQLite-store поддержки включается только явным `thread_store=`.
 
 ---
 

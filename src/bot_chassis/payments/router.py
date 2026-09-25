@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from loguru import logger
 
-from ..config import BotChassisConfig, resolved_origin
+from ..config import BotChassisConfig, resolved_alert_chat_id, resolved_origin
 from ..ports.payments import SkuVoucher, SkuVoucherConsumerPort
 from ..storage import Storage
 from ..storage.repositories.transactions import VoucherRecord
@@ -69,7 +69,7 @@ def create_payments_router(
                 logger.error("successful_payment без пользователя и с битым payload")
                 await _notify_support(
                     message.bot,
-                    config.audit_chat_id or config.support_chat_id,
+                    resolved_alert_chat_id(config),
                     f"Битый payload оплаты без пользователя. charge={payment.telegram_payment_charge_id}",
                 )
                 return
@@ -98,7 +98,7 @@ def create_payments_router(
         if invalid:
             await _notify_support(
                 message.bot,
-                config.audit_chat_id or config.support_chat_id,
+                resolved_alert_chat_id(config),
                 f"Битый payload оплаты. charge={payment.telegram_payment_charge_id}",
             )
             return
@@ -110,7 +110,7 @@ def create_payments_router(
         if config.notify_on_payment:
             await _notify_support(
                 message.bot,
-                config.audit_chat_id or config.support_chat_id,
+                resolved_alert_chat_id(config),
                 f"Оплата {payment.total_amount} {payment.currency}. sku={sku_code} user_id={user_id} charge={payment.telegram_payment_charge_id}",
             )
 
