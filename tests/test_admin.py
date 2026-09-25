@@ -235,6 +235,23 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         on, _reason = await self.storage.bot_settings.get_maintenance_status("bot_a")
         self.assertFalse(on)
 
+    async def test_admin_command_is_silent_in_supergroup(self) -> None:
+        user = _user(14)
+        message = Message(
+            message_id=1,
+            date=1,
+            chat=Chat(id=-100500, type="supergroup"),
+            from_user=user,
+            text="/admin",
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=500, message=message))
+        self.assertFalse(
+            any(
+                item.chat_id == -100500
+                for item in self._named("SendMessage")
+            )
+        )
+
     async def test_admin_home_summary_and_maintenance_toggle(self) -> None:
         await self._feed_command(14, 1)
         sent = self._named("SendMessage")
@@ -781,6 +798,53 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         on, reason = await self.storage.bot_settings.get_maintenance_status("bot_a")
         self.assertFalse(on)
         self.assertIsNone(reason)
+
+    async def test_network_maintenance_splits_tenant_and_current_origin(self) -> None:
+        network_config = BotChassisConfig(
+            bot_id="psybot",
+            db_path=self.db_path,
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+            origin_bot_id="adhd",
+        )
+        network_storage = await create_storage(network_config)
+        await network_storage.roles.grant_role("psybot", 14, "admin", granted_by=100)
+        self.dp = Dispatcher()
+        self.dp.include_router(create_admin_router("psybot", network_storage, network_config))
+
+        await self._feed_text(14, "/maintenance on network pause", 101)
+        self.assertEqual(
+            await network_storage.bot_settings.get_maintenance_status("psybot"),
+            (True, "network pause"),
+        )
+        self.assertEqual(
+            await network_storage.bot_settings.get_maintenance_status("adhd"),
+            (False, None),
+        )
+
+        await self._feed_text(14, "/maintenance adhd on local pause", 102)
+        self.assertEqual(
+            await network_storage.bot_settings.get_maintenance_status("adhd"),
+            (True, "local pause"),
+        )
+
+        self.session.requests.clear()
+        await self._feed_text(14, "/maintenance bipolar off", 103)
+        self.assertEqual(
+            [item.text for item in self._named("SendMessage") if item.chat_id == 14],
+            ["Этот бот = adhd"],
+        )
+        self.assertEqual(
+            await network_storage.bot_settings.get_maintenance_status("adhd"),
+            (True, "local pause"),
+        )
+
+        self.session.requests.clear()
+        await self._feed_text(14, "/maintenance", 104)
+        status = [item.text for item in self._named("SendMessage") if item.chat_id == 14]
+        self.assertEqual(len(status), 1)
+        self.assertIn("Сеть: Рубильник опущен. Причина: network pause", status[0])
+        self.assertIn("adhd: Рубильник опущен. Причина: local pause", status[0])
 
     async def test_broadcast_preview_delivery_and_stop(self) -> None:
         self.assertEqual(

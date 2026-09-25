@@ -12,6 +12,20 @@ class WorkGatePort(Protocol):
     async def can_accept_work(self, bot_id: str, user_id: int) -> tuple[bool, str | None]: ...
 
 
+async def can_accept_domain_work(
+    gate: WorkGatePort,
+    tenant_bot_id: str,
+    origin_bot_id: str,
+    user_id: int,
+) -> tuple[bool, str | None]:
+    ok, reason = await gate.can_accept_work(tenant_bot_id, user_id)
+    if not ok:
+        return ok, reason
+    if origin_bot_id != tenant_bot_id:
+        return await gate.can_accept_work(origin_bot_id, user_id)
+    return True, None
+
+
 class DefaultWorkGateAdapter(WorkGatePort):
     def __init__(self, settings_repo: BotSettingsRepository, users_repo: UsersRepository):
         self._settings = settings_repo

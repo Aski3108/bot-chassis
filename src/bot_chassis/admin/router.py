@@ -8,6 +8,7 @@ import tempfile
 import uuid
 
 from aiogram import F, Router
+from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
@@ -59,7 +60,7 @@ REFUND_ALREADY = "Платёж уже возвращён"
 REFUND_NO_CHARGE = "У платежа нет идентификатора Stars"
 REFUND_REJECTED = "Telegram не подтвердил возврат"
 REFUND_OTHER_BOT = "Платёж принял другой бот; откройте /refund в нём"
-MAINTENANCE_USAGE = "Формат: /maintenance [on|off] [причина]"
+MAINTENANCE_USAGE = "Формат: /maintenance [on|off] [причина] или /maintenance bot_id on|off [причина]"
 
 
 def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig) -> Router:
@@ -67,7 +68,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
     staff = AdminRoleFilter(bot_id, storage.roles)
     root = SuperadminRoleFilter(bot_id, storage.roles)
 
-    @router.message(Command("admin", ignore_mention=True), staff)
+    @router.message(Command("admin", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_admin(message: Message) -> None:
         user = message.from_user
         if user is None or await _is_banned(storage, bot_id, user.id):
@@ -75,7 +76,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         text, markup = await _home(storage, bot_id)
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
-    @router.message(Command("ban", ignore_mention=True), staff)
+    @router.message(Command("ban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_ban(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -99,7 +100,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Пользователь {target_id} забанен")
 
-    @router.message(Command("unban", ignore_mention=True), staff)
+    @router.message(Command("unban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_unban(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -116,7 +117,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         await send_admin_audit(message.bot, config, f"Разбан user_id={target_id}. actor={actor.id}")
         await _reply(message, f"Пользователь {target_id} разбанен")
 
-    @router.message(Command("shadowban", ignore_mention=True), staff)
+    @router.message(Command("shadowban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_shadowban(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -140,7 +141,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Теневой бан {state}: {target_id}")
 
-    @router.message(Command("grant", ignore_mention=True), root)
+    @router.message(Command("grant", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_grant(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -161,7 +162,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Роль {role} выдана: {target_id}")
 
-    @router.message(Command("revoke", ignore_mention=True), root)
+    @router.message(Command("revoke", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_revoke(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -182,7 +183,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Роль {role} снята: {target_id}")
 
-    @router.message(Command("gift", ignore_mention=True), root)
+    @router.message(Command("gift", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_gift(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -206,7 +207,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Подарок выдан {span}: {target_id}")
 
-    @router.message(Command("gift_revoke", ignore_mention=True), root)
+    @router.message(Command("gift_revoke", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_gift_revoke(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -227,7 +228,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         )
         await _reply(message, f"Подарок отозван: {target_id}")
 
-    @router.message(Command("user", ignore_mention=True), staff)
+    @router.message(Command("user", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_user(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -268,7 +269,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
         await _edit_dossier(call, storage, bot_id, target_id)
         await call.answer()
 
-    @router.message(Command("export", ignore_mention=True), root)
+    @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_export_command(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -280,7 +281,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             return
         await _send_export(message.bot, storage, config, bot_id, actor.id, scope or "all")
 
-    @router.message(Command("backup", ignore_mention=True), root)
+    @router.message(Command("backup", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_backup(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -290,7 +291,7 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             return
         await _send_backup(message.bot, storage, actor.id)
 
-    @router.message(Command("refund", ignore_mention=True), staff)
+    @router.message(Command("refund", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_refund(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -365,14 +366,26 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             return
         await _reply(message, f"Платёж возвращён: {canon_payment_id}")
 
-    @router.message(Command("maintenance", ignore_mention=True), staff)
+    @router.message(Command("maintenance", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_maintenance_command(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
             return
         args = _command_args(message)
         current, reason = await storage.bot_settings.get_maintenance_status(bot_id)
+        origin_bot_id = config.origin_bot_id
+        current_origin = resolved_origin(config)
         if not args:
+            if origin_bot_id is not None and current_origin != bot_id:
+                local, local_reason = await storage.bot_settings.get_maintenance_status(
+                    current_origin
+                )
+                await _reply(
+                    message,
+                    f"Сеть: {_maintenance_text(current, reason)}\n"
+                    f"{current_origin}: {_maintenance_text(local, local_reason)}",
+                )
+                return
             await _reply(message, _maintenance_text(current, reason))
             return
         flag = args[0]
@@ -383,6 +396,26 @@ def create_admin_router(bot_id: str, storage: Storage, config: BotChassisConfig)
             new_reason = " ".join(args[1:]).strip() or reason
             await _set_maintenance(message, storage, config, bot_id, actor, True, new_reason)
             return
+        if origin_bot_id is not None and len(args) >= 2 and args[1] in {"on", "off"}:
+            requested_origin = args[0]
+            if requested_origin != current_origin:
+                await _reply(message, f"Этот бот = {current_origin}")
+                return
+            local_current, local_reason = await storage.bot_settings.get_maintenance_status(
+                current_origin
+            )
+            local_flag = args[1]
+            if local_flag == "off" and len(args) == 2:
+                await _set_maintenance(
+                    message, storage, config, current_origin, actor, False, None
+                )
+                return
+            if local_flag == "on":
+                new_reason = " ".join(args[2:]).strip() or local_reason
+                await _set_maintenance(
+                    message, storage, config, current_origin, actor, True, new_reason
+                )
+                return
         await _reply(message, MAINTENANCE_USAGE)
 
     @router.callback_query(F.data == CB_MAINT, staff)
@@ -801,10 +834,16 @@ async def _set_maintenance(message, storage, config, bot_id: str, actor, enabled
         updated_by=actor.id,
     )
     state = "опущен" if enabled else "снят"
+    scope = f" ({bot_id})" if bot_id != config.bot_id else ""
     username = f" @{actor.username}" if actor.username else ""
     cause = f" Причина: {reason}." if reason else ""
-    await send_admin_audit(message.bot, config, f"Рубильник {state}.{cause} user_id={actor.id}{username}")
-    await _reply(message, _maintenance_text(enabled, reason))
+    await send_admin_audit(
+        message.bot,
+        config,
+        f"Рубильник{scope} {state}.{cause} user_id={actor.id}{username}",
+    )
+    reply = _maintenance_text(enabled, reason)
+    await _reply(message, f"{bot_id}: {reply}" if scope else reply)
 
 
 def _refund_mark_error(code: str | None) -> str:

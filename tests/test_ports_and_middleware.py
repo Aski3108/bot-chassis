@@ -9,7 +9,7 @@ import time
 import unittest
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
@@ -34,7 +34,7 @@ from bot_chassis.ports.access import DefaultAccessAdapter
 from bot_chassis.ports.cabinet import build_cabinet_renderer
 from bot_chassis.ports.cabinet import DefaultCabinetSlotsAdapter
 from bot_chassis.ports.payments import DefaultVoucherManagerAdapter
-from bot_chassis.ports.work_gate import DefaultWorkGateAdapter
+from bot_chassis.ports.work_gate import DefaultWorkGateAdapter, can_accept_domain_work
 from bot_chassis.router import create_button_chassis_router
 from bot_chassis.storage import create_storage
 from bot_chassis.storage.engine import parse_utc, utc_now
@@ -137,6 +137,35 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         ok, reason = await gate.can_accept_work("bot_a", 5)
         self.assertTrue(ok)
         self.assertIsNone(reason)
+
+    async def test_domain_work_gate_checks_tenant_before_origin(self) -> None:
+        gate = AsyncMock()
+        gate.can_accept_work.side_effect = [(True, None), (False, "local pause")]
+
+        self.assertEqual(
+            await can_accept_domain_work(gate, "psybot", "adhd", 7),
+            (False, "local pause"),
+        )
+        self.assertEqual(
+            gate.can_accept_work.await_args_list,
+            [call("psybot", 7), call("adhd", 7)],
+        )
+
+        gate.reset_mock()
+        gate.can_accept_work.side_effect = [(False, "network pause")]
+        self.assertEqual(
+            await can_accept_domain_work(gate, "psybot", "adhd", 7),
+            (False, "network pause"),
+        )
+        gate.can_accept_work.assert_awaited_once_with("psybot", 7)
+
+        gate.reset_mock()
+        gate.can_accept_work.side_effect = [(True, None)]
+        self.assertEqual(
+            await can_accept_domain_work(gate, "psybot", "psybot", 7),
+            (True, None),
+        )
+        gate.can_accept_work.assert_awaited_once_with("psybot", 7)
 
     async def test_access_adapter_invariants(self) -> None:
         access = DefaultAccessAdapter(self.storage.subscriptions)
