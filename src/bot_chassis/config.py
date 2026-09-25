@@ -11,6 +11,7 @@ class SkuItem:
     title: str
     description: str
     stars_price: int
+    issues_voucher: bool = True
 
 
 @dataclass(slots=True, frozen=True)
@@ -31,3 +32,8 @@ class BotChassisConfig:
     enable_language_switch: bool = False
     enable_referrals: bool = False
     welcome_text: str | None = None  # HTML, как меню /start; None — текст шасси
+    origin_bot_id: str | None = None
+
+
+def resolved_origin(config: BotChassisConfig) -> str:
+    return config.origin_bot_id or config.bot_id

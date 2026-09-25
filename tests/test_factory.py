@@ -15,12 +15,29 @@ from aiogram.filters import Command
 from aiogram.methods import TelegramMethod
 from aiogram.types import Chat, Message, Update, User
 
-from bot_chassis.config import BotChassisConfig
+from bot_chassis.config import BotChassisConfig, SkuItem, resolved_origin
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.middleware.error_monitor import ErrorAlertMiddleware
 from bot_chassis.middleware.throttling import ThrottlingMiddleware
 from bot_chassis.middleware.user_activity import UserActivityMiddleware
 from bot_chassis.storage import create_storage
+
+
+class TestConfigCompatibility(unittest.TestCase):
+    def test_new_fields_preserve_defaults_and_positional_arguments(self) -> None:
+        config = BotChassisConfig("bot_a", True)
+        sku = SkuItem("sku", "Title", "Description", 10)
+
+        self.assertTrue(config.enable_buttons)
+        self.assertIsNone(config.origin_bot_id)
+        self.assertTrue(sku.issues_voucher)
+
+    def test_resolved_origin_prefers_explicit_origin(self) -> None:
+        self.assertEqual(resolved_origin(BotChassisConfig("bot_a")), "bot_a")
+        self.assertEqual(
+            resolved_origin(BotChassisConfig("tenant", origin_bot_id="origin")),
+            "origin",
+        )
 
 
 class _Session(BaseSession):
