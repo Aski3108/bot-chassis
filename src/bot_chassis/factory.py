@@ -46,6 +46,7 @@ class CompleteChassis:
     cabinet: CabinetSlotsProviderPort
     locale_cache: dict[int, str]
     thread_store: object | None = None
+    pending_store: PendingInputStore | None = None
 
 
 async def create_complete_chassis(
@@ -65,6 +66,8 @@ async def create_complete_chassis(
     extra_admin_actions: ExtraAdminActions | None = None,
     thread_store=None,
     extra_support_inline: Sequence[Sequence[tuple[str, str]]] | None = None,
+    pending_store: PendingInputStore | None = None,
+    before_chassis_menu_action=None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -110,6 +113,7 @@ async def create_complete_chassis(
     if domain_router is not None:
         dp.include_router(domain_router)
     resolved_thread_store = thread_store
+    resolved_pending = pending_store
     if config.enable_buttons:
         if resolved_thread_store is None:
             resolved_thread_store = SupportThreadStore()
@@ -121,10 +125,11 @@ async def create_complete_chassis(
             )
         else:
             resolved_support_inline = extra_support_inline
-        pending = PendingInputStore()
+        if resolved_pending is None:
+            resolved_pending = PendingInputStore()
         screens = UserScreenTracker()
         dp.include_router(
-            _create_start_router(config, locale_cache, domain_rows, pending, screens)
+            _create_start_router(config, locale_cache, domain_rows, resolved_pending, screens)
         )
         dp.include_router(
             create_button_chassis_router(
@@ -134,12 +139,13 @@ async def create_complete_chassis(
                 get_user_locale=lambda uid: locale_cache.get(uid) or config.default_locale,
                 default_locale=config.default_locale,
                 task_tracker=ActiveTaskTracker(),
-                pending_store=pending,
+                pending_store=resolved_pending,
                 screen_tracker=screens,
                 thread_store=resolved_thread_store,
                 project_label=project_label,
                 render_info_callback=render_info_callback,
                 extra_support_inline=resolved_support_inline,
+                before_chassis_menu_action=before_chassis_menu_action,
             )
         )
 
@@ -155,6 +161,7 @@ async def create_complete_chassis(
         cabinet=cabinet,
         locale_cache=locale_cache,
         thread_store=resolved_thread_store,
+        pending_store=resolved_pending,
     )
 
 

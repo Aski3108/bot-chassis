@@ -69,6 +69,8 @@ async def main(bot: Bot) -> None:
         extra_admin_actions=None,
         thread_store=None,               # None → legacy JSON; SQLite только явно
         extra_support_inline=None,
+        pending_store=None,               # None → штатный PendingInputStore
+        before_chassis_menu_action=None,
     )
     register_button_chassis_startup(chassis.dp, bot)
     await chassis.dp.start_polling(bot)
@@ -153,6 +155,8 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `extra_admin_actions` | `None` | Ряды `adm_ops:*` в общей админке |
 | `thread_store` | JSON `SupportThreadStore` | Явный общий SQLite-store для сети |
 | `extra_support_inline` | donate-SKU каталога | Дополнительные кнопки поддержки |
+| `pending_store` | `PendingInputStore()` | Тот же объект в `CompleteChassis.pending_store` |
+| `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -183,7 +187,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 Постоянный `ReplyKeyboardMarkup`, приватные команды `/start` `/menu` `/help` `/support`, синее меню через `register_button_chassis_startup`.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
-Ввод: `PendingInputStore`, TTL 15 мин.  
+Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  
 Мост поддержки: JSON `SupportThreadStore` остаётся compatibility default. Для сети кузов явно передаёт `SqliteSupportThreadStore`; dual-write нет.
 

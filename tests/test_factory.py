@@ -17,6 +17,7 @@ from aiogram.types import Chat, Message, Update, User
 
 from bot_chassis.config import BotChassisConfig, SkuItem, resolved_origin
 from bot_chassis.factory import create_complete_chassis
+from bot_chassis.followup import PendingInputKind, PendingInputStore
 from bot_chassis.middleware.error_monitor import ErrorAlertMiddleware
 from bot_chassis.middleware.throttling import ThrottlingMiddleware
 from bot_chassis.middleware.user_activity import UserActivityMiddleware
@@ -306,6 +307,99 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
                 for item in self.session.requests
             )
         )
+
+    async def test_factory_returns_shared_pending_store_and_menu_hook(self) -> None:
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+        )
+        default_chassis = await create_complete_chassis(self.bot, config)
+        self.assertIsInstance(default_chassis.pending_store, PendingInputStore)
+
+        user = User(id=7, is_bot=False, first_name="N")
+        await default_chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=1,
+                message=Message(
+                    message_id=1,
+                    date=1,
+                    chat=Chat(id=7, type="private"),
+                    from_user=user,
+                    text="/support",
+                ),
+            ),
+        )
+        self.assertTrue(
+            default_chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE)
+        )
+
+        shared = PendingInputStore()
+        events: list[tuple[int, bool]] = []
+
+        async def before_menu(user_id: int) -> None:
+            events.append((user_id, shared.is_active(user_id, PendingInputKind.SUPPORT_MESSAGE)))
+
+        chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            pending_store=shared,
+            before_chassis_menu_action=before_menu,
+        )
+        self.assertIs(chassis.pending_store, shared)
+
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=2,
+                message=Message(
+                    message_id=2,
+                    date=1,
+                    chat=Chat(id=7, type="private"),
+                    from_user=user,
+                    text="/support",
+                ),
+            ),
+        )
+        self.assertEqual(events, [(7, False)])
+        self.assertTrue(shared.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
+
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=3,
+                message=Message(
+                    message_id=3,
+                    date=1,
+                    chat=Chat(id=7, type="private"),
+                    from_user=user,
+                    text="/start",
+                ),
+            ),
+        )
+        self.assertFalse(shared.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
+
+        events.clear()
+        for update_id, text in (
+            (4, "👤 Личный кабинет"),
+            (5, "ℹ️ Info"),
+        ):
+            await chassis.dp.feed_update(
+                self.bot,
+                Update(
+                    update_id=update_id,
+                    message=Message(
+                        message_id=update_id,
+                        date=1,
+                        chat=Chat(id=7, type="private"),
+                        from_user=user,
+                        text=text,
+                    ),
+                ),
+            )
+        self.assertEqual([item[0] for item in events], [7, 7])
 
 
 def _load_runner():

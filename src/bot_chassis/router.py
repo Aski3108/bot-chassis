@@ -93,6 +93,8 @@ def create_button_chassis_router(
     project_label: str = "Сервис",
     default_locale: str = "ru",
     extra_support_inline: Optional[Sequence[Sequence[tuple[str, str]]]] = None,
+    *,
+    before_chassis_menu_action: Optional[Callable[[int], Awaitable[None]]] = None,
 ) -> Router:
     """
     Фабрика универсального роутера шасси кнопок.
@@ -125,6 +127,11 @@ def create_button_chassis_router(
             enable_support=enable_support,
         )
 
+    async def _run_before_chassis_menu(user_id: int) -> None:
+        if before_chassis_menu_action is None:
+            return
+        await before_chassis_menu_action(user_id)
+
     # ----------------------------------------------------------------------
     # 1. КОМАНДА /menu: Восстановление нижней клавиатуры (НЕ УДАЛЯЕТСЯ!)
     # ----------------------------------------------------------------------
@@ -155,6 +162,7 @@ def create_button_chassis_router(
                 return
 
             try:
+                await _run_before_chassis_menu(user_id)
                 pending.clear(user_id)
                 # Закрываем предыдущую карточку экрана перед показом новой
                 await screens.close_previous_card(message.bot, user_id)
@@ -193,6 +201,7 @@ def create_button_chassis_router(
                 return
 
             try:
+                await _run_before_chassis_menu(user_id)
                 pending.clear(user_id)
                 await screens.close_previous_card(message.bot, user_id)
 
@@ -237,6 +246,7 @@ def create_button_chassis_router(
                 return
 
             try:
+                await _run_before_chassis_menu(user_id)
                 # Активируем режим ожидания ввода тикета
                 pending.set(
                     user_id,
