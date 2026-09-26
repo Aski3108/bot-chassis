@@ -13,7 +13,7 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.filters import Command
 from aiogram.methods import TelegramMethod
-from aiogram.types import Chat, Message, Update, User
+from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from bot_chassis.config import BotChassisConfig, SkuItem, resolved_origin
 from bot_chassis.factory import create_complete_chassis
@@ -400,6 +400,86 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         self.assertEqual([item[0] for item in events], [7, 7])
+
+    async def test_factory_user_dossier_extra_ports(self) -> None:
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            superadmin_ids=(100,),
+            enable_payments=False,
+        )
+
+        async def extra_lines(user_id: int):
+            return [f"hours:{user_id}"]
+
+        def extra_rows(user_id: int):
+            return [[("Grant hours", f"adm_ops:grant_hours:{user_id}")]]
+
+        class Extra:
+            def __init__(self) -> None:
+                self.handle_callback = AsyncMock(return_value=True)
+
+            def home_rows(self):
+                return ()
+
+        extra = Extra()
+        chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            extra_admin_actions=extra,
+            extra_user_dossier_lines=extra_lines,
+            extra_user_dossier_rows=extra_rows,
+        )
+        await chassis.storage.users.upsert_user("bot_a", 16, username="ann")
+        admin = User(id=100, is_bot=False, first_name="Root")
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=1,
+                message=Message(
+                    message_id=1,
+                    date=1,
+                    chat=Chat(id=100, type="private"),
+                    from_user=admin,
+                    text="/user 16",
+                ),
+            ),
+        )
+        sent = next(
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "SendMessage" and "Досье пользователя" in item.text
+        )
+        self.assertTrue(sent.text.endswith("hours:16"))
+        buttons = [
+            (button.text, button.callback_data)
+            for row in sent.reply_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(buttons[-2], ("Grant hours", "adm_ops:grant_hours:16"))
+        self.assertEqual(buttons[-1], ("« Главное меню админки", "adm_home"))
+
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=100, type="private"),
+            from_user=admin,
+            text="dossier",
+        )
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=2,
+                callback_query=CallbackQuery(
+                    id="c2",
+                    from_user=admin,
+                    chat_instance="x",
+                    data="adm_ops:grant_hours:16",
+                    message=panel,
+                ),
+            ),
+        )
+        extra.handle_callback.assert_awaited_once()
 
 
 def _load_runner():

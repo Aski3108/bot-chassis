@@ -71,6 +71,8 @@ async def main(bot: Bot) -> None:
         extra_support_inline=None,
         pending_store=None,               # None → штатный PendingInputStore
         before_chassis_menu_action=None,
+        extra_user_dossier_lines=None,
+        extra_user_dossier_rows=None,
     )
     register_button_chassis_startup(chassis.dp, bot)
     await chassis.dp.start_polling(bot)
@@ -157,6 +159,8 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `extra_support_inline` | donate-SKU каталога | Дополнительные кнопки поддержки |
 | `pending_store` | `PendingInputStore()` | Тот же объект в `CompleteChassis.pending_store` |
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
+| `extra_user_dossier_lines` | старый текст `/user` | Доп. строки внизу досье; `callable(user_id) -> sequence[str]` |
+| `extra_user_dossier_rows` | старые кнопки `/user` | Ряды кнопок перед «Главное меню админки»; клики — `extra_admin_actions` |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -213,7 +217,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 ### 5.4 Админка
 
 Фильтры `admin` / `superadmin`. Команды: `/admin`, `/user`, `/ban`, `/unban`, `/shadowban`, `/grant`, `/revoke`, `/gift`, `/gift_revoke`, `/export`, `/backup`, `/refund`, `/maintenance`.  
-Досье `adm_usr:*`, возврат `adm_home`.  
+Досье `adm_usr:*`, возврат `adm_home`. `extra_user_dossier_lines` / `extra_user_dossier_rows` дополняют `/user`; `None` — старая карточка; клики новых кнопок идут в `extra_admin_actions.handle_callback`.  
 Рассылка 25 msg/s, свой RAM-store (не FSM кнопок), общий `asyncio.Lock`.  
 Экспорт CSV/ZIP только суперадмину в ЛС. Бэкап ≤ 50 МБ через `FSInputFile`.  
 Команды админки работают только в private. `/refund charge_id` или `/refund user_id payment_id`: запись сначала ограничивается фактическим Telegram bot ID, затем вызывается Bot API и `mark_refunded` по каноническому `payment_id`.

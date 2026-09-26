@@ -323,6 +323,59 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         await self._feed_callback(14, "adm_ops:restart:adhd", 202, panel)
         extra.handle_callback.assert_awaited_once()
 
+    async def test_extra_user_dossier_lines_and_rows_dispatch_to_extra_actions(self) -> None:
+        class ExtraActions:
+            def __init__(self) -> None:
+                self.handle_callback = AsyncMock(return_value=True)
+
+            def home_rows(self):
+                return ()
+
+        extra = ExtraActions()
+
+        async def extra_lines(user_id: int):
+            return [f"Extra hours: {user_id}"]
+
+        def extra_rows(user_id: int):
+            return [[("Grant hours", f"adm_ops:grant_hours:{user_id}")]]
+
+        self.dp = Dispatcher()
+        self.dp.include_router(
+            create_admin_router(
+                "bot_a",
+                self.storage,
+                self.config,
+                extra_actions=extra,
+                extra_user_dossier_lines=extra_lines,
+                extra_user_dossier_rows=extra_rows,
+            )
+        )
+        await self._feed_text(14, "/user 15", 301)
+        sent = next(
+            item
+            for item in self._named("SendMessage")
+            if item.chat_id == 14 and "Досье пользователя" in item.text
+        )
+        self.assertTrue(sent.text.endswith("Extra hours: 15"))
+        buttons = [
+            (button.text, button.callback_data)
+            for row in sent.reply_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(buttons[-2], ("Grant hours", "adm_ops:grant_hours:15"))
+        self.assertEqual(buttons[-1], ("« Главное меню админки", "adm_home"))
+        self.assertEqual(buttons[-3][1], "adm_usr:role_adm:15")
+
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=14, type="private"),
+            from_user=_user(14),
+            text="dossier",
+        )
+        await self._feed_callback(14, "adm_ops:grant_hours:15", 302, panel)
+        extra.handle_callback.assert_awaited_once()
+
     async def test_export_button_is_superadmin_only(self) -> None:
         panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="admin")
         await self._feed_callback(14, CB_EXPORT, 1, panel)

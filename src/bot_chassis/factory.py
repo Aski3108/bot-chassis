@@ -68,6 +68,8 @@ async def create_complete_chassis(
     extra_support_inline: Sequence[Sequence[tuple[str, str]]] | None = None,
     pending_store: PendingInputStore | None = None,
     before_chassis_menu_action=None,
+    extra_user_dossier_lines=None,
+    extra_user_dossier_rows=None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -95,6 +97,8 @@ async def create_complete_chassis(
                 storage,
                 config,
                 extra_actions=extra_admin_actions,
+                extra_user_dossier_lines=extra_user_dossier_lines,
+                extra_user_dossier_rows=extra_user_dossier_rows,
             )
         )
     if config.enable_payments:

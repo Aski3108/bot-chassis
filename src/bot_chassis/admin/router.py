@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import inspect
 import os
 import tempfile
 import uuid
@@ -70,6 +71,9 @@ def create_admin_router(
     storage: Storage,
     config: BotChassisConfig,
     extra_actions: ExtraAdminActions | None = None,
+    *,
+    extra_user_dossier_lines=None,
+    extra_user_dossier_rows=None,
 ) -> Router:
     router = Router(name="admin")
     staff = AdminRoleFilter(bot_id, storage.roles)
@@ -245,7 +249,13 @@ def create_admin_router(
         if target_id is None:
             await _reply(message, USER_USAGE)
             return
-        card = await _dossier(storage, bot_id, target_id)
+        card = await _dossier(
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+        )
         if card is None:
             await _reply(message, USER_NOT_FOUND)
             return
@@ -273,7 +283,14 @@ def create_admin_router(
         if error:
             await call.answer(error, show_alert=True)
             return
-        await _edit_dossier(call, storage, bot_id, target_id)
+        await _edit_dossier(
+            call,
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+        )
         await call.answer()
 
     @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
@@ -592,7 +609,22 @@ def _user_callback(action: str, user_id: int) -> str:
     return f"adm_usr:{action}:{user_id}"
 
 
-async def _dossier(storage: Storage, bot_id: str, user_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
+async def _invoke_user_port(port, user_id: int):
+    if port is None:
+        return None
+    result = port(user_id)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
+async def _dossier(
+    storage: Storage,
+    bot_id: str,
+    user_id: int,
+    extra_user_dossier_lines=None,
+    extra_user_dossier_rows=None,
+) -> tuple[str, InlineKeyboardMarkup] | None:
     user = await storage.users.get_user(bot_id, user_id)
     if user is None:
         return None
@@ -601,9 +633,12 @@ async def _dossier(storage: Storage, bot_id: str, user_id: int) -> tuple[str, In
     vouchers = await storage.transactions.get_active_vouchers(bot_id, user_id)
     payments = await _paid_count(storage, bot_id, user_id)
     referrals = await storage.referrals.get_referrals_count(bot_id, user_id)
-    return _dossier_text(user, roles, subscription, len(vouchers), payments, referrals), _dossier_keyboard(
-        user, "admin" in roles
-    )
+    text = _dossier_text(user, roles, subscription, len(vouchers), payments, referrals)
+    extra_lines = await _invoke_user_port(extra_user_dossier_lines, user_id)
+    if extra_lines:
+        text = text + "\n" + "\n".join(extra_lines)
+    extra_rows = await _invoke_user_port(extra_user_dossier_rows, user_id)
+    return text, _dossier_keyboard(user, "admin" in roles, extra_rows=extra_rows or ())
 
 
 def _dossier_text(user, roles: list[str], subscription, vouchers: int, payments: int, referrals: int) -> str:
@@ -628,21 +663,31 @@ def _dossier_text(user, roles: list[str], subscription, vouchers: int, payments:
     return "\n".join(lines)
 
 
-def _dossier_keyboard(user, has_admin: bool) -> InlineKeyboardMarkup:
+def _dossier_keyboard(
+    user,
+    has_admin: bool,
+    extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
+) -> InlineKeyboardMarkup:
     ban_label = "🟢 Разбанить" if user.is_banned else "🔴 Забанить"
     shadow_label = "👻 Теневой бан: ВЫКЛ" if user.is_shadow_banned else "👻 Теневой бан: ВКЛ"
     role_label = "🚫 Снять Admin" if has_admin else "👑 Роль Admin"
     uid = user.user_id
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=ban_label, callback_data=_user_callback("ban", uid))],
-            [InlineKeyboardButton(text=shadow_label, callback_data=_user_callback("shban", uid))],
-            [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
-            [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
-            [InlineKeyboardButton(text=role_label, callback_data=_user_callback("role_adm", uid))],
-            [InlineKeyboardButton(text="« Главное меню админки", callback_data=CB_HOME)],
+    rows = [
+        [InlineKeyboardButton(text=ban_label, callback_data=_user_callback("ban", uid))],
+        [InlineKeyboardButton(text=shadow_label, callback_data=_user_callback("shban", uid))],
+        [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
+        [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
+        [InlineKeyboardButton(text=role_label, callback_data=_user_callback("role_adm", uid))],
+    ]
+    for row in extra_rows or ():
+        buttons = [
+            InlineKeyboardButton(text=text, callback_data=callback_data)
+            for text, callback_data in row
         ]
-    )
+        if buttons:
+            rows.append(buttons)
+    rows.append([InlineKeyboardButton(text="« Главное меню админки", callback_data=CB_HOME)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _apply_dossier_action(call, storage, config, bot_id: str, action: str, target_id: int) -> str | None:
@@ -711,11 +756,24 @@ async def _apply_dossier_action(call, storage, config, bot_id: str, action: str,
     return None
 
 
-async def _edit_dossier(call: CallbackQuery, storage: Storage, bot_id: str, user_id: int) -> None:
+async def _edit_dossier(
+    call: CallbackQuery,
+    storage: Storage,
+    bot_id: str,
+    user_id: int,
+    extra_user_dossier_lines=None,
+    extra_user_dossier_rows=None,
+) -> None:
     message = call.message
     if message is None or isinstance(message, InaccessibleMessage):
         return
-    card = await _dossier(storage, bot_id, user_id)
+    card = await _dossier(
+        storage,
+        bot_id,
+        user_id,
+        extra_user_dossier_lines=extra_user_dossier_lines,
+        extra_user_dossier_rows=extra_user_dossier_rows,
+    )
     if card is None:
         return
     text, markup = card
