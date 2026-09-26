@@ -224,6 +224,8 @@ SKU с `issues_voucher=False` (например, донат) сохраняет�
 
 ### 5.6 Сеть: tenant, origin и фактический бот
 
+> Подробное руководство по стыковке с сетью PsyBot: [docs/PSYBOT_INTEGRATION.md](PSYBOT_INTEGRATION.md).
+
 - `bot_id` — общий tenant данных. Семь процессов одной сети используют одно значение и один SQLite-файл.
 - `origin_bot_id` — логическое имя конкретного бота; если не задано, равно `bot_id`.
 - Фактический Telegram bot ID берётся из токена во время выполнения. Платёж уникален по `(bot_id, provider, merchant_telegram_bot_id, payment_id)`.
