@@ -7,7 +7,7 @@
 **Тесты:** `pytest tests/`; кнопочный контракт `tests/test_chassis.py` заморожен.
 
 Это рабочий факт рамы: как подключить, что внутри открыто, что заглушка с портом, чего в v1 нет.  
-История проектирования лежит в [archive/](archive/README.md) и **не** является очередью работ.
+История версий: [CHANGELOG.md](../CHANGELOG.md). История проектирования лежит в [archive/](archive/README.md) и **не** является очередью работ.
 
 Шлюз `src/bot_chassis/bot_gateway.py` и сигнатуры Button Chassis не менять.
 
@@ -202,7 +202,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 
 Порядок: ErrorAlert → Throttling → UserActivity.
 
-- Ошибки хэндлера → `support_chat_id`, если тумблер включён.  
+- Ошибки хэндлера → `audit_chat_id or support_chat_id`, если тумблер включён.  
 - Троттлинг 5/с; `pre_checkout_query` и `successful_payment` не режутся.  
 - UserActivity: upsert, локаль, тень (админов не глушит, платежи не дропает), first-touch `traffic_source`, при `enable_referrals` — `/start ref_<id>`.
 
