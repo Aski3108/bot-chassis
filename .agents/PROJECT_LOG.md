@@ -20,4 +20,4 @@
 
 **Не тронуто.** Репозиторий Profiling Framework. `psybot_test`. Push на origin. Live Telegram smoke.
 
-**Тесты.** Полный `pytest tests/` рамы после merge.
+**Тесты.** Полный `pytest tests/` рамы после merge: **110 passed**. Merge-commit: `d3c5de8`.

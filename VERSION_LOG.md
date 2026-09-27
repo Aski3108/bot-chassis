@@ -9,7 +9,7 @@
 
 | Поле | Значение |
 |---|---|
-| Tag | `v0.2.2` (ставится на merge-commit) |
+| Tag | `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112` |
 | Previous stable | `6823f30` |
 | Profiling hold | tag `profiling` = `6823f30` |
 | Incoming | `feat/psybot-network` @ `faf10b7` |
