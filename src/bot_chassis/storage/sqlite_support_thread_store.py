@@ -109,7 +109,11 @@ class SqliteSupportThreadStore:
 
     def resolve_user(self, chat_id: int, reply_to_message_id: int) -> Optional[int]:
         target = self.resolve_ticket(chat_id, reply_to_message_id)
-        return target.user_id if target else None
+        return (
+            target.user_id
+            if target is not None and target.ticket_status == "open"
+            else None
+        )
 
     def mark_answered(self, user_id: int) -> None:
         """Legacy fallback: answer the oldest open ticket for this user."""

@@ -89,6 +89,7 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
         self.assertEqual(adhd.resolve_ticket(-100, 30).ticket_id, "ticket-3")
         self.assertEqual(self.bpd.resolve_user(-100, 20), 7)
+        self.assertIsNone(self.bpd.resolve_user(-100, 10))
 
         def _inspect(conn):
             user = conn.execute(
@@ -171,6 +172,13 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
     async def test_memory_database_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             SqliteSupportThreadStore(":memory:", "psybot", "bpd", 101)
+
+    async def test_resolve_user_hides_closed_tickets(self) -> None:
+        self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        self.assertEqual(self.bpd.resolve_user(-100, 10), 7)
+        self.bpd.mark_ticket_answered("ticket-1")
+        self.assertIsNone(self.bpd.resolve_user(-100, 10))
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
 
     async def test_origin_reply_on_closed_ticket_is_already_answered(self) -> None:
         self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
