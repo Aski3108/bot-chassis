@@ -204,6 +204,8 @@ async def deliver_support_reply_to_user(
             return False, "UNKNOWN_THREAD"
         if target_ticket.origin_telegram_bot_id != bot.id:
             return False, "FOREIGN_ORIGIN"
+        if getattr(target_ticket, "ticket_status", "open") != "open":
+            return False, "ALREADY_ANSWERED"
         target_user_id = target_ticket.user_id
     else:
         target_user_id = thread_store.resolve_user(

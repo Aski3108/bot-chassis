@@ -342,7 +342,7 @@ def create_button_chassis_router(
             )
             if not success:
                 # Если ответ не привязан к тикету (админы переписываются между собой) — тишина
-                if status in {"UNKNOWN_THREAD", "FOREIGN_ORIGIN"}:
+                if status in {"UNKNOWN_THREAD", "FOREIGN_ORIGIN", "ALREADY_ANSWERED"}:
                     return
                 # Уведомляем админа ТОЛЬКО при реальной ошибке доставки известному пользователю
                 await message.reply(f"⚠️ {status}")

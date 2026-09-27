@@ -21,6 +21,7 @@ class SupportTicketTarget:
     ticket_id: str
     origin_bot_id: str
     origin_telegram_bot_id: int
+    ticket_status: str
 
 
 class SqliteSupportThreadStore:
@@ -139,10 +140,10 @@ class SqliteSupportThreadStore:
         try:
             row = conn.execute(
                 """
-                SELECT user_id, ticket_id, origin_bot_id, origin_telegram_bot_id
+                SELECT user_id, ticket_id, origin_bot_id, origin_telegram_bot_id,
+                       ticket_status
                 FROM support_threads
                 WHERE bot_id = ? AND support_chat_id = ? AND support_message_id = ?
-                  AND ticket_status = 'open'
                 """,
                 (self._tenant_bot_id, chat_id, reply_to_message_id),
             ).fetchone()
@@ -153,6 +154,7 @@ class SqliteSupportThreadStore:
                 ticket_id=str(row["ticket_id"]),
                 origin_bot_id=str(row["origin_bot_id"]),
                 origin_telegram_bot_id=int(row["origin_telegram_bot_id"]),
+                ticket_status=str(row["ticket_status"]),
             )
         finally:
             conn.close()

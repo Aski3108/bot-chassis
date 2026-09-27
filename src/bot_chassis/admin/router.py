@@ -62,7 +62,10 @@ REFUND_ALREADY = "Платёж уже возвращён"
 REFUND_NO_CHARGE = "У платежа нет идентификатора Stars"
 REFUND_REJECTED = "Telegram не подтвердил возврат"
 REFUND_OTHER_BOT = "Платёж принял другой бот; откройте /refund в нём"
-MAINTENANCE_USAGE = "Формат: /maintenance [on|off] [причина] или /maintenance bot_id on|off [причина]"
+MAINTENANCE_USAGE = (
+    "Формат: /maintenance [on|off] [причина] или /maintenance bot_id on|off [причина]. "
+    "Локальная пауза останавливает опросники этого бота, но не отключает Stars."
+)
 
 
 def create_admin_router(

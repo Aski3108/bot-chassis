@@ -208,9 +208,12 @@ class TestMountInvariants(unittest.IsolatedAsyncioTestCase):
             sqlite_store,
         )
         self.assertTrue(delivered)
-        self.assertIsNone(sqlite_store.resolve_ticket(-100, 10))
+        closed = sqlite_store.resolve_ticket(-100, 10)
+        self.assertEqual(closed.ticket_id, "ticket-1")
+        self.assertEqual(closed.ticket_status, "answered")
         self.assertEqual(
             sqlite_store.resolve_ticket(-100, 20).ticket_id,
             "ticket-2",
         )
+        self.assertEqual(sqlite_store.resolve_ticket(-100, 20).ticket_status, "open")
         await factory_bot.session.close()
