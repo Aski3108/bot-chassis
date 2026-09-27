@@ -1280,6 +1280,13 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         return [item for item in self.session.requests if item.__class__.__name__ == name]
 
 
+class TestMaintenanceUsage(unittest.TestCase):
+    def test_usage_says_local_pause_does_not_stop_stars(self) -> None:
+        self.assertIn("/maintenance", MAINTENANCE_USAGE)
+        self.assertIn("не отключает Stars", MAINTENANCE_USAGE)
+        self.assertIn("опросники", MAINTENANCE_USAGE)
+
+
 def _csv_rows(payload: bytes) -> list[list[str]]:
     return list(csv.reader(io.StringIO(payload.decode("utf-8-sig"))))
 

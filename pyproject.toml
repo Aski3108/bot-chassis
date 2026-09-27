@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bot-chassis"
-version = "0.1.0"
+version = "0.2.2"
 description = "Universal portable Telegram bot chassis based on aiogram v3"
 readme = "README.md"
 requires-python = ">=3.10"

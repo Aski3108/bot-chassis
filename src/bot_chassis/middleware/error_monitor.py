@@ -1,4 +1,4 @@
-"""Перехват необработанных исключений на Update: ответ пользователю и алерт в саппорт."""
+"""Перехват необработанных исключений на Update: ответ пользователю и алерт в audit_chat_id or support_chat_id."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class ErrorAlertMiddleware(BaseMiddleware):
         except Exception:
             escaped = html.escape(traceback.format_exc()[-3500:])
             await self._reply_to_user(event)
-            await self._alert_support(data, escaped)
+            await self._alert_service_chat(data, escaped)
             return None
 
     async def _reply_to_user(self, event: TelegramObject) -> None:
@@ -49,7 +49,7 @@ class ErrorAlertMiddleware(BaseMiddleware):
         except Exception:
             logger.exception("Не удалось сообщить пользователю об ошибке шасси")
 
-    async def _alert_support(self, data: dict[str, Any], escaped_traceback: str) -> None:
+    async def _alert_service_chat(self, data: dict[str, Any], escaped_traceback: str) -> None:
         chat_id = resolved_alert_chat_id(self._config)
         bot = data.get("bot")
         if chat_id is None or bot is None:
@@ -61,4 +61,4 @@ class ErrorAlertMiddleware(BaseMiddleware):
                 parse_mode="HTML",
             )
         except Exception:
-            logger.exception("Не удалось отправить алерт об ошибке в чат поддержки")
+            logger.exception("Не удалось отправить алерт об ошибке в служебный чат")

@@ -80,11 +80,16 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target.ticket_id, "ticket-1")
         self.assertEqual(target.origin_bot_id, "bpd")
         self.assertEqual(target.origin_telegram_bot_id, 101)
+        self.assertEqual(target.ticket_status, "open")
         self.assertEqual(self.bpd.mark_ticket_answered("ticket-1"), 2)
-        self.assertIsNone(self.bpd.resolve_ticket(-100, 10))
+        closed = self.bpd.resolve_ticket(-100, 10)
+        self.assertEqual(closed.ticket_id, "ticket-1")
+        self.assertEqual(closed.ticket_status, "answered")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_id, "ticket-2")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
         self.assertEqual(adhd.resolve_ticket(-100, 30).ticket_id, "ticket-3")
         self.assertEqual(self.bpd.resolve_user(-100, 20), 7)
+        self.assertIsNone(self.bpd.resolve_user(-100, 10))
 
         def _inspect(conn):
             user = conn.execute(
@@ -127,8 +132,10 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(success)
         self.assertEqual(len(origin_bot.sent), 2)
-        self.assertIsNone(self.bpd.resolve_ticket(-100, 10))
+        closed = self.bpd.resolve_ticket(-100, 10)
+        self.assertEqual(closed.ticket_status, "answered")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_id, "ticket-2")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
 
     async def test_atomic_limit_and_bridge_compensation(self) -> None:
         limited = SqliteSupportThreadStore(
@@ -165,6 +172,84 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
     async def test_memory_database_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             SqliteSupportThreadStore(":memory:", "psybot", "bpd", 101)
+
+    async def test_resolve_user_hides_closed_tickets(self) -> None:
+        self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        self.assertEqual(self.bpd.resolve_user(-100, 10), 7)
+        self.bpd.mark_ticket_answered("ticket-1")
+        self.assertIsNone(self.bpd.resolve_user(-100, 10))
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+
+    async def test_origin_reply_on_closed_ticket_is_already_answered(self) -> None:
+        self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        self.bpd.register(-100, 7, 20, 21, ticket_id="ticket-2")
+        self.bpd.mark_ticket_answered("ticket-1")
+        reply = SimpleNamespace(
+            chat=SimpleNamespace(id=-100),
+            message_id=500,
+            reply_to_message=SimpleNamespace(message_id=11),
+        )
+
+        origin_bot = _Bot(101)
+        success, status = await deliver_support_reply_to_user(
+            origin_bot, reply, self.bpd
+        )
+        self.assertFalse(success)
+        self.assertEqual(status, "ALREADY_ANSWERED")
+        self.assertEqual(origin_bot.sent, [])
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
+        self.assertEqual(self.bpd.mark_ticket_answered("ticket-1"), 0)
+
+        foreign_bot = _Bot(202)
+        success, status = await deliver_support_reply_to_user(
+            foreign_bot, reply, self.bpd
+        )
+        self.assertFalse(success)
+        self.assertEqual(status, "FOREIGN_ORIGIN")
+        self.assertEqual(foreign_bot.sent, [])
+
+        unknown = SimpleNamespace(
+            chat=SimpleNamespace(id=-100),
+            message_id=501,
+            reply_to_message=SimpleNamespace(message_id=999),
+        )
+        success, status = await deliver_support_reply_to_user(
+            origin_bot, unknown, self.bpd
+        )
+        self.assertFalse(success)
+        self.assertEqual(status, "UNKNOWN_THREAD")
+
+    async def test_seven_bots_one_reply_only_origin_delivers(self) -> None:
+        self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        reply = SimpleNamespace(
+            chat=SimpleNamespace(id=-100),
+            message_id=500,
+            reply_to_message=SimpleNamespace(message_id=11),
+        )
+        bots = [_Bot(101 + index) for index in range(7)]
+        outcomes: list[tuple[int, bool, str, list]] = []
+        for bot in bots:
+            success, status = await deliver_support_reply_to_user(bot, reply, self.bpd)
+            outcomes.append((bot.id, success, status, list(bot.sent)))
+
+        delivered = [item for item in outcomes if item[1]]
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(delivered[0][0], 101)
+        self.assertEqual(len(delivered[0][3]), 2)
+        silent = [item for item in outcomes if not item[1]]
+        self.assertEqual(len(silent), 6)
+        self.assertTrue(all(item[2] == "FOREIGN_ORIGIN" and item[3] == [] for item in silent))
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+
+        origin_again = _Bot(101)
+        success, status = await deliver_support_reply_to_user(
+            origin_again, reply, self.bpd
+        )
+        self.assertFalse(success)
+        self.assertEqual(status, "ALREADY_ANSWERED")
+        self.assertEqual(origin_again.sent, [])
+        self.assertEqual(self.bpd.mark_ticket_answered("ticket-1"), 0)
 
 
 if __name__ == "__main__":

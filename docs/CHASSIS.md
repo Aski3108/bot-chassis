@@ -120,16 +120,16 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `db_path` | `bot_chassis.db` | SQLite |
 | `superadmin_ids` | `()` | Посев при `create_storage` |
 | `skus` | `()` | Каталог Stars |
-| `support_chat_id` | `None` | Мост поддержки и алерты оплаты |
-| `audit_chat_id` | `None` | Канал аудита админки |
+| `support_chat_id` | `None` | Тикеты поддержки |
+| `audit_chat_id` | `None` | Ошибки, оплаты и административные события; если не задан — `support_chat_id` |
 | `welcome_text` | `None` | HTML для `/start`; `None` — текст шасси |
 | `default_locale` | `"ru"` | ru / en |
 | `enable_buttons` | `True` | Нижнее меню |
 | `enable_admin` | `True` | `/admin` и команды |
 | `enable_payments` | `True` | Stars |
 | `enable_throttling` | `True` | 5 апдейтов/с, whitelist платежей |
-| `enable_error_alerts` | `True` | Падения в `support_chat_id` |
-| `notify_on_payment` | `True` | Алерт об оплате |
+| `enable_error_alerts` | `True` | Падения в `audit_chat_id or support_chat_id` |
+| `notify_on_payment` | `True` | Алерт об оплате в `audit_chat_id or support_chat_id` |
 | `enable_language_switch` | `False` | Колбэк `core_lang:*` |
 | `enable_referrals` | `False` | `/start ref_<id>` и слот кабинета |
 | `origin_bot_id` | `None` | Логическое имя origin; `None` → значение `bot_id` |

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import os
 import tempfile
+import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot, Dispatcher, Router
@@ -22,8 +25,12 @@ from bot_chassis.middleware.error_monitor import ErrorAlertMiddleware
 from bot_chassis.middleware.throttling import ThrottlingMiddleware
 from bot_chassis.middleware.user_activity import UserActivityMiddleware
 from bot_chassis.storage import create_storage
-from bot_chassis.storage.sqlite_support_thread_store import SqliteSupportThreadStore
-from bot_chassis.support_bridge import SupportThreadStore
+from bot_chassis.storage.engine import StorageEngine
+from bot_chassis.storage.sqlite_support_thread_store import (
+    SqliteSupportThreadStore,
+    TicketLimitExceeded,
+)
+from bot_chassis.support_bridge import SupportThreadStore, send_user_report_to_support
 
 
 class TestConfigCompatibility(unittest.TestCase):
@@ -480,6 +487,167 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             ),
         )
         extra.handle_callback.assert_awaited_once()
+
+    async def test_ticket_limit_race_through_factory_storage(self) -> None:
+        await create_storage(BotChassisConfig(bot_id="psybot", db_path=self.db_path))
+        store_a = SqliteSupportThreadStore(
+            self.db_path,
+            tenant_bot_id="psybot",
+            origin_bot_id="bpd",
+            origin_telegram_bot_id=101,
+            max_active_tickets_per_user=1,
+        )
+        store_b = SqliteSupportThreadStore(
+            self.db_path,
+            tenant_bot_id="psybot",
+            origin_bot_id="adhd",
+            origin_telegram_bot_id=202,
+            max_active_tickets_per_user=1,
+        )
+        self.assertTrue(store_a.can_send_ticket(7))
+        self.assertTrue(store_b.can_send_ticket(7))
+
+        barrier = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def worker(store: SqliteSupportThreadStore, header: int, copy: int, ticket_id: str) -> None:
+            barrier.wait()
+            try:
+                store.register(-100, 7, header, copy, ticket_id=ticket_id)
+                outcomes.append("ok")
+            except TicketLimitExceeded:
+                outcomes.append("limit")
+
+        first = threading.Thread(target=worker, args=(store_a, 10, 11, "ticket-a"))
+        second = threading.Thread(target=worker, args=(store_b, 20, 21, "ticket-b"))
+        first.start()
+        second.start()
+        first.join()
+        second.join()
+        self.assertEqual(sorted(outcomes), ["limit", "ok"])
+
+        store_a.can_send_ticket = lambda _user_id: True  # type: ignore[method-assign]
+        store_b.can_send_ticket = lambda _user_id: True  # type: ignore[method-assign]
+
+        class _Bot:
+            def __init__(self, bot_id: int) -> None:
+                self.id = bot_id
+                self.sent: list[tuple[str, int]] = []
+                self.deleted: list[tuple[int, int]] = []
+                self._next_message_id = 100
+
+            async def send_message(self, chat_id: int, text: str, **_kwargs):
+                self.sent.append(("send", chat_id))
+                message = SimpleNamespace(message_id=self._next_message_id)
+                self._next_message_id += 1
+                return message
+
+            async def copy_message(self, chat_id: int, from_chat_id: int, message_id: int):
+                del from_chat_id, message_id
+                self.sent.append(("copy", chat_id))
+                message = SimpleNamespace(message_id=self._next_message_id)
+                self._next_message_id += 1
+                return message
+
+            async def delete_message(self, chat_id: int, message_id: int) -> None:
+                self.deleted.append((chat_id, message_id))
+
+        bot_a = _Bot(101)
+        bot_b = _Bot(202)
+        user_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=8, username="ann", full_name="Ann"),
+            chat=SimpleNamespace(id=8),
+            message_id=50,
+        )
+        copied_a, copied_b = await asyncio.gather(
+            send_user_report_to_support(bot_a, -100, user_message, store_a),
+            send_user_report_to_support(bot_b, -100, user_message, store_b),
+        )
+        created = [item for item in (copied_a, copied_b) if item is not None]
+        self.assertEqual(len(created), 1)
+        self.assertTrue((copied_a is None) ^ (copied_b is None))
+        loser = bot_a if copied_a is None else bot_b
+        self.assertEqual(len(loser.deleted), 2)
+
+        def inspect(conn):
+            open_headers = conn.execute(
+                """
+                SELECT COUNT(*) FROM support_threads
+                WHERE bot_id = 'psybot' AND user_id = 8
+                  AND ticket_status = 'open' AND message_role = 'header'
+                """
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM support_threads WHERE bot_id = 'psybot' AND user_id = 8"
+            ).fetchone()[0]
+            return open_headers, rows
+
+        open_headers, rows = await StorageEngine(self.db_path).run(inspect)
+        self.assertEqual(open_headers, 1)
+        self.assertEqual(rows, 2)
+
+    async def test_seven_bots_share_one_reply_through_factory(self) -> None:
+        origin_session = _Session()
+        origin_bot = Bot(token="100001:ABC", session=origin_session)
+        config = BotChassisConfig(
+            bot_id="psybot",
+            origin_bot_id="bpd",
+            db_path=self.db_path,
+            support_chat_id=-100,
+            enable_admin=False,
+            enable_payments=False,
+        )
+        store = SqliteSupportThreadStore(
+            self.db_path,
+            tenant_bot_id="psybot",
+            origin_bot_id="bpd",
+            origin_telegram_bot_id=origin_bot.id,
+        )
+        chassis = await create_complete_chassis(
+            origin_bot, config, thread_store=store
+        )
+        store.register(-100, 7, 10, 11, ticket_id="ticket-1")
+        group = Chat(id=-100, type="supergroup")
+        admin = User(id=14, is_bot=False, first_name="Admin")
+        replied_to = Message(message_id=10, date=1, chat=group, text="ticket")
+        reply = Message(
+            message_id=12,
+            date=1,
+            chat=group,
+            from_user=admin,
+            text="answer",
+            reply_to_message=replied_to,
+        )
+        bots = [origin_bot]
+        sessions = [origin_session]
+        for index in range(1, 7):
+            session = _Session()
+            bots.append(Bot(token=f"10000{index + 1}:ABC", session=session))
+            sessions.append(session)
+        for update_id, bot in enumerate(bots, 200):
+            await chassis.dp.feed_update(bot, Update(update_id=update_id, message=reply))
+
+        user_sends = [
+            item
+            for session in sessions
+            for item in session.requests
+            if item.__class__.__name__ in {"SendMessage", "CopyMessage"}
+            and getattr(item, "chat_id", None) == 7
+        ]
+        self.assertEqual(len(user_sends), 2)
+        self.assertEqual(store.resolve_ticket(-100, 10).ticket_status, "answered")
+        origin_session.requests.clear()
+        await chassis.dp.feed_update(origin_bot, Update(update_id=300, message=reply))
+        self.assertFalse(
+            any(
+                item.__class__.__name__ in {"SendMessage", "CopyMessage"}
+                and getattr(item, "chat_id", None) == 7
+                for item in origin_session.requests
+            )
+        )
+        for extra in bots[1:]:
+            await extra.session.close()
+        await origin_bot.session.close()
 
 
 def _load_runner():

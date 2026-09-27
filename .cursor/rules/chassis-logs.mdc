@@ -1,0 +1,20 @@
+---
+description: Any Bot Chassis work must update PROJECT_LOG and VERSION_LOG
+alwaysApply: true
+---
+
+# Chassis logs
+
+This repository is Bot Chassis. Every change here, including merge and tag, must be written down in the chassis itself.
+
+Required on every commit that changes the frame:
+
+1. Append `.agents/PROJECT_LOG.md`: date, why, commits, files, tests, what was not touched.
+2. Append `VERSION_LOG.md` when the stable version or a tag moves: tag, HEAD, previous, why, commits included, consumers (Profiling / psybot).
+3. Keep `CHANGELOG.md` in sync with the version you tagged.
+
+Do not skip the logs because tests are green. Do not record chassis history only in `psybot_test`.
+
+Profiling Framework uses tag `profiling` as the hold point. Do not switch Profiling to a new chassis checkout unless the owner says so in this chat.
+
+Do not push, force-push, or retag `profiling` unless the owner asks.
