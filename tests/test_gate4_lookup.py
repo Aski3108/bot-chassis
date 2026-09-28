@@ -16,9 +16,15 @@ from bot_chassis.admin.lookup import (
     FIND_CANCELLED,
     FIND_PROMPT,
     admin_lookup_is_waiting,
+    begin_admin_lookup,
+    cancel_admin_lookup,
     reset_admin_lookups,
 )
-from bot_chassis.admin.router import CB_FIND, create_admin_router
+from bot_chassis.admin.broadcast import (
+    is_awaiting_broadcast_text,
+    reset_broadcast_sessions,
+)
+from bot_chassis.admin.router import CB_BROADCAST, CB_FIND, create_admin_router
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.followup import PendingInput, PendingInputKind, PendingInputStore
 from bot_chassis.storage import create_storage
@@ -65,6 +71,7 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         self.storage = await create_storage(self.config)
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
         reset_admin_lookups()
+        reset_broadcast_sessions()
         self.session = _Session()
         self.bot = Bot(token="123456:ABC", session=self.session)
         self.dp = Dispatcher()
@@ -74,6 +81,7 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         await self.bot.session.close()
         self._tmp.cleanup()
         reset_admin_lookups()
+        reset_broadcast_sessions()
 
     def _texts(self, chat_id: int) -> list[str]:
         return [
@@ -165,13 +173,13 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
 
         await self._callback(14, CB_FIND, 1)
         self.assertIn(FIND_PROMPT, self._texts(14))
-        self.assertTrue(admin_lookup_is_waiting(14))
+        self.assertTrue(admin_lookup_is_waiting("bot_a", 14))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
 
         self.session.requests.clear()
         await self._text(14, "/cancel", 2)
         self.assertIn(FIND_CANCELLED, self._texts(14))
-        self.assertFalse(admin_lookup_is_waiting(14))
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
         self.assertIsNotNone(pending.get(14))
 
         await self._callback(14, CB_FIND, 3)
@@ -179,5 +187,48 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         await self._text(14, "@neo", 4)
         dossier = self._texts(14)
         self.assertTrue(any("ID: 16" in text for text in dossier))
-        self.assertFalse(admin_lookup_is_waiting(14))
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
+
+    async def test_lookup_and_broadcast_waits_are_scoped_by_bot(self) -> None:
+        begin_admin_lookup("bot_a", 14)
+        self.assertTrue(admin_lookup_is_waiting("bot_a", 14))
+        self.assertFalse(admin_lookup_is_waiting("bot_b", 14))
+
+        begin_admin_lookup("bot_b", 14)
+        cancel_admin_lookup("bot_a", 14)
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
+        self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
+        cancel_admin_lookup("bot_b", 14)
+
+        await self._callback(14, CB_BROADCAST, 10)
+        self.assertTrue(is_awaiting_broadcast_text("bot_a", 14))
+        self.assertFalse(is_awaiting_broadcast_text("bot_b", 14))
+
+        config_b = BotChassisConfig(
+            bot_id="bot_b",
+            db_path=self.db_path,
+            superadmin_ids=(200,),
+            audit_chat_id=-200,
+        )
+        storage_b = await create_storage(config_b)
+        await storage_b.roles.grant_role("bot_b", 14, "admin", granted_by=200)
+        dp_b = Dispatcher()
+        dp_b.include_router(create_admin_router("bot_b", storage_b, config_b))
+        panel = Message(message_id=40, date=1, chat=Chat(id=14, type="private"), text="admin")
+        await dp_b.feed_update(
+            self.bot,
+            Update(
+                update_id=11,
+                callback_query=CallbackQuery(
+                    id="11",
+                    from_user=_user(14),
+                    chat_instance="x",
+                    data=CB_FIND,
+                    message=panel,
+                ),
+            ),
+        )
+        self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
+        self.assertTrue(is_awaiting_broadcast_text("bot_a", 14))
+        self.assertIn(FIND_PROMPT, self._texts(14))

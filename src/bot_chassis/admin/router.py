@@ -531,14 +531,14 @@ def create_admin_router(
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
             return
-        if is_awaiting_broadcast_text(actor.id):
+        if is_awaiting_broadcast_text(bot_id, actor.id):
             await call.answer("Сначала завершите рассылку", show_alert=True)
             return
-        begin_admin_lookup(actor.id)
+        begin_admin_lookup(bot_id, actor.id)
         await call.bot.send_message(actor.id, FIND_PROMPT)
         await call.answer()
 
-    @router.message(AwaitingAdminLookup(), F.chat.type == ChatType.PRIVATE, staff)
+    @router.message(AwaitingAdminLookup(bot_id), F.chat.type == ChatType.PRIVATE, staff)
     async def capture_user_lookup(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -546,13 +546,13 @@ def create_admin_router(
         text = (message.text or "").strip()
         command = text.split(maxsplit=1)[0].split("@", 1)[0] if text.startswith("/") else ""
         if command == "/cancel":
-            cancel_admin_lookup(actor.id)
+            cancel_admin_lookup(bot_id, actor.id)
             await _reply(message, FIND_CANCELLED)
             return
         if not text:
             await _reply(message, FIND_PROMPT)
             return
-        cancel_admin_lookup(actor.id)
+        cancel_admin_lookup(bot_id, actor.id)
         target_id = await _target_from_token(message, storage, bot_id, text, USER_NOT_FOUND)
         if target_id is None:
             return

@@ -1030,7 +1030,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             async def stop_after_actor(bot, method, timeout=None):
                 result = await original(bot, method, timeout)
                 if method.__class__.__name__ == "SendMessage" and getattr(method, "text", "") == "halt":
-                    session = _BROADCAST_SESSIONS.get(14)
+                    session = _BROADCAST_SESSIONS.get(("bot_a", 14))
                     if session is not None:
                         session.cancel = True
                 return result

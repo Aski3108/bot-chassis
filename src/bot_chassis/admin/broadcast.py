@@ -26,7 +26,7 @@ BROADCAST_PROGRESS_EVERY = 25
 BROADCAST_PROMPT = "Пришлите текст рассылки."
 _RETRY_LIMIT = 5
 
-_BROADCAST_SESSIONS: dict[int, "BroadcastSession"] = {}
+_BROADCAST_SESSIONS: dict[tuple[str, int], "BroadcastSession"] = {}
 _BROADCAST_LOCK = asyncio.Lock()
 
 
@@ -37,8 +37,8 @@ class BroadcastSession:
     cancel: bool = False
 
 
-def is_awaiting_broadcast_text(actor_id: int) -> bool:
-    session = _BROADCAST_SESSIONS.get(actor_id)
+def is_awaiting_broadcast_text(bot_id: str, actor_id: int) -> bool:
+    session = _BROADCAST_SESSIONS.get((bot_id, actor_id))
     return session is not None and session.phase == "awaiting"
 
 
@@ -55,28 +55,30 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
             return
-        current = _BROADCAST_SESSIONS.get(actor.id)
+        key = (bot_id, actor.id)
+        current = _BROADCAST_SESSIONS.get(key)
         if current is not None and current.phase == "running":
             await call.answer("Рассылка уже идёт", show_alert=True)
             return
         from .lookup import cancel_admin_lookup
 
-        cancel_admin_lookup(actor.id)
-        _BROADCAST_SESSIONS[actor.id] = BroadcastSession(phase="awaiting")
+        cancel_admin_lookup(bot_id, actor.id)
+        _BROADCAST_SESSIONS[key] = BroadcastSession(phase="awaiting")
         await call.bot.send_message(actor.id, BROADCAST_PROMPT)
         await call.answer()
 
-    @router.message(AwaitingBroadcastText(), staff)
+    @router.message(AwaitingBroadcastText(bot_id), staff)
     async def capture_broadcast_text(message: Message) -> None:
         actor = message.from_user
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             return
-        session = _BROADCAST_SESSIONS.get(actor.id)
+        key = (bot_id, actor.id)
+        session = _BROADCAST_SESSIONS.get(key)
         if session is None or session.phase != "awaiting":
             return
         text = (message.text or "").strip()
         if text == "/cancel":
-            _BROADCAST_SESSIONS.pop(actor.id, None)
+            _BROADCAST_SESSIONS.pop(key, None)
             await message.answer("Рассылка отменена")
             return
         if not text:
@@ -96,7 +98,7 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
             return
-        _BROADCAST_SESSIONS.pop(actor.id, None)
+        _BROADCAST_SESSIONS.pop((bot_id, actor.id), None)
         await call.answer("Рассылка отменена")
 
     @router.callback_query(F.data == CB_BROADCAST_GO, staff)
@@ -105,7 +107,8 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
             return
-        session = _BROADCAST_SESSIONS.get(actor.id)
+        key = (bot_id, actor.id)
+        session = _BROADCAST_SESSIONS.get(key)
         if session is None or session.phase != "preview" or not session.text:
             await call.answer("Нет текста рассылки", show_alert=True)
             return
@@ -115,7 +118,7 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         try:
             await _run_broadcast(call.bot, storage, config, bot_id, actor.id, session)
         finally:
-            _BROADCAST_SESSIONS.pop(actor.id, None)
+            _BROADCAST_SESSIONS.pop(key, None)
 
     @router.callback_query(F.data == CB_BROADCAST_STOP, staff)
     async def stop_broadcast(call: CallbackQuery) -> None:
@@ -123,7 +126,7 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if actor is None:
             await call.answer()
             return
-        session = _BROADCAST_SESSIONS.get(actor.id)
+        session = _BROADCAST_SESSIONS.get((bot_id, actor.id))
         if session is None or session.phase != "running":
             await call.answer()
             return
@@ -132,11 +135,14 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
 
 
 class AwaitingBroadcastText(Filter):
+    def __init__(self, bot_id: str) -> None:
+        self._bot_id = bot_id
+
     async def __call__(self, message: Message) -> bool:
         actor = message.from_user
         if actor is None:
             return False
-        session = _BROADCAST_SESSIONS.get(actor.id)
+        session = _BROADCAST_SESSIONS.get((self._bot_id, actor.id))
         return session is not None and session.phase == "awaiting"
 
 
