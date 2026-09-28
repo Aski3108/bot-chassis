@@ -17,7 +17,15 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
-from .contracts import MenuLabels, CB_NAV_CLOSE, CB_SUPPORT_CANCEL, CB_SUPPORT_HUB
+from .contracts import (
+    MenuLabels,
+    CB_NAV_CLOSE,
+    CB_SUPPORT_CANCEL,
+    CB_SUPPORT_HUB,
+    CB_SUPPORT_TICKET_CLOSE_PREFIX,
+    CB_SUPPORT_TICKET_REOPEN_PREFIX,
+    CB_SUPPORT_USER_REPLY_PREFIX,
+)
 
 
 def build_main_menu_keyboard(
@@ -137,6 +145,37 @@ def build_donation_keyboard(
     ]
     rows.append([InlineKeyboardButton(text="← Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_operator_ticket_keyboard(ticket_id: str, *, closed: bool) -> InlineKeyboardMarkup:
+    """Кнопки оператора на карточке тикета. Отработанное действие снимается заменой разметки."""
+    if closed:
+        rows = [[
+            InlineKeyboardButton(
+                text="↩️ Открыть снова",
+                callback_data=f"{CB_SUPPORT_TICKET_REOPEN_PREFIX}{ticket_id}",
+            )
+        ]]
+    else:
+        rows = [[
+            InlineKeyboardButton(
+                text="✅ Закрыть обращение",
+                callback_data=f"{CB_SUPPORT_TICKET_CLOSE_PREFIX}{ticket_id}",
+            )
+        ]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_user_ticket_reply_keyboard(ticket_id: str) -> InlineKeyboardMarkup:
+    """Пользователь продолжает тот же тикет, лимит новых обращений не проверяется."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Ответить поддержке",
+                callback_data=f"{CB_SUPPORT_USER_REPLY_PREFIX}{ticket_id}",
+            )
+        ]]
+    )
 
 
 def build_close_inline_keyboard(

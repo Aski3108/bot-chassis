@@ -68,7 +68,7 @@ async def main(bot: Bot) -> None:
         project_label="Shop",
         render_info_callback=None,
         extra_admin_actions=None,
-        thread_store=None,               # None → legacy JSON; SQLite только явно
+        thread_store=None,               # None + постоянный db_path → SQLite; :memory: и явный JSON — одноразовый legacy
         extra_support_inline=None,
         pending_store=None,               # None → штатный PendingInputStore
         before_chassis_menu_action=None,
@@ -162,7 +162,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `project_label` | `"Сервис"` | Название проекта в карточке поддержки |
 | `render_info_callback` | `None` | Рендер кузовной карточки Info |
 | `extra_admin_actions` | `None` | Ряды `adm_ops:*` в общей админке |
-| `thread_store` | JSON `SupportThreadStore` | Явный общий SQLite-store для сети |
+| `thread_store` | SQLite при постоянном `db_path` | Явный JSON остаётся одноразовым. SQLite: `open → in_progress → closed`, без текста сообщений |
 | `extra_support_inline` | пусто | Дополнительные кнопки на форме запроса. Донатные SKU туда больше не подставляются |
 | `pending_store` | `PendingInputStore()` | Тот же объект в `CompleteChassis.pending_store`. Scope `user_navigation` не стирает админский поиск |
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
@@ -207,6 +207,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — канонический `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно; переданные кузовом `menu`, `start`, `help`, `support` игнорируются. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку. Без кузовного рендера рама показывает двуязычный Info; при включённом языке на нём есть toggle.
 Кнопка «Поддержка» открывает обзор (запрос, отзыв если есть sink, донат если есть каталог, назад на `render_start_callback`). Скрытая `/support` сразу включает ожидание нового обращения. Донатные суммы рама не зашивает.
+SQLite-тикет не закрывается первым ответом: оператор отвечает несколько раз, пользователь жмёт «Ответить поддержке», слот освобождает только «Закрыть обращение». JSON-store по-прежнему одноразовый.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  
@@ -229,7 +230,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 WAL, одна связь на транзакцию, `bot_id` везде. `amount` только INTEGER.  
 Посев суперадминов: `INSERT OR IGNORE`.
 
-Таблицы: `users`, `roles`, `transactions`, `subscriptions`, `support_threads`, `bot_settings`, `referrals`.  
+Таблицы: `users`, `roles`, `transactions`, `subscriptions`, `support_threads`, `support_ticket_messages`, `bot_settings`, `referrals`.
 Схема: `src/bot_chassis/storage/schema.sql`. Колонки `provider` / `payment_id` готовы к другим шлюзам; **в v1 пишется только** `telegram_stars`.
 
 `consent_at` шасси хранит, сбор согласия — кузов.
@@ -265,9 +266,9 @@ SKU с `issues_voucher=False` (например, донат) сохраняет�
 - `bot_id` — общий tenant данных. Семь процессов одной сети используют одно значение и один SQLite-файл.
 - `origin_bot_id` — логическое имя конкретного бота; если не задано, равно `bot_id`.
 - Фактический Telegram bot ID берётся из токена во время выполнения. Платёж уникален по `(bot_id, provider, merchant_telegram_bot_id, payment_id)`.
-- В общей support-группе Reply доставляет только процесс origin-бота и закрывает только выбранный `ticket_id`; остальные процессы молчат.
+- В общей support-группе Reply доставляет только процесс origin-бота и продолжает выбранный `ticket_id`; чужой бот, чат или тема молчат. Закрытие явно снимает слот.
 - `audit_chat_id` используется для аудита, а служебные алерты выбирают audit-or-support. Все семь ботов могут быть администраторами служебной группы.
-- Универсальная фабрика не угадывает сетевой режим: SQLite-store поддержки включается только явным `thread_store=`.
+- При постоянном `db_path` фабрика сама создаёт SQLite-store поддержки. `:memory:` и явно переданный JSON остаются одноразовым legacy.
 
 ---
 

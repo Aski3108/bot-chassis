@@ -115,7 +115,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(ours[2], UserActivityMiddleware)
         self.assertTrue(await chassis.storage.roles.has_any_role("bot_a", 100, ("superadmin",)))
         self.assertIs(chassis.locale_cache, ours[2]._locale_cache)
-        self.assertIsInstance(chassis.thread_store, SupportThreadStore)
+        self.assertIsInstance(chassis.thread_store, SqliteSupportThreadStore)
 
         await chassis.storage.users.upsert_user("bot_a", 7, username="ann")
         slots = await chassis.cabinet.get_cabinet_slots("bot_a", 7)
@@ -205,7 +205,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         sent = [item for item in self.session.requests if item.__class__.__name__ == "SendMessage"]
         self.assertTrue(any(item.text == "<b>Привет!</b>" for item in sent))
 
-    async def test_factory_keeps_json_default_and_accepts_explicit_sqlite_store(self) -> None:
+    async def test_factory_uses_sqlite_for_persistent_db_and_accepts_explicit_store(self) -> None:
         config = BotChassisConfig(
             bot_id="tenant",
             origin_bot_id="bpd",
@@ -215,7 +215,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             enable_payments=False,
         )
         default_chassis = await create_complete_chassis(self.bot, config)
-        self.assertIsInstance(default_chassis.thread_store, SupportThreadStore)
+        self.assertIsInstance(default_chassis.thread_store, SqliteSupportThreadStore)
 
         explicit_store = SqliteSupportThreadStore(
             self.db_path,
@@ -229,6 +229,15 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             thread_store=explicit_store,
         )
         self.assertIs(explicit_chassis.thread_store, explicit_store)
+
+        json_store = SupportThreadStore(persistence_file=None)
+        json_chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            thread_store=json_store,
+        )
+        self.assertIs(json_chassis.thread_store, json_store)
+        self.assertFalse(json_store.supports_continuation)
 
         explicit_store.register(-100, 7, 10, 11, ticket_id="ticket-1")
         foreign_session = _Session()
@@ -638,7 +647,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             and getattr(item, "chat_id", None) == 7
         ]
         self.assertEqual(len(user_sends), 2)
-        self.assertEqual(store.resolve_ticket(-100, 10).ticket_status, "answered")
+        self.assertEqual(store.resolve_ticket(-100, 10).ticket_status, "in_progress")
         origin_session.requests.clear()
         await chassis.dp.feed_update(origin_bot, Update(update_id=300, message=reply))
         self.assertFalse(

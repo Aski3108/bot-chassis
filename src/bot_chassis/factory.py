@@ -35,6 +35,7 @@ from .ports.referrals import DefaultReferralAdapter, ReferralPort
 from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
 from .router import create_button_chassis_router
 from .storage import Storage, create_storage
+from .storage.sqlite_support_thread_store import SqliteSupportThreadStore
 from .support_bridge import SupportThreadStore
 from .user_lifecycle import register_membership_handler, warn_if_my_chat_member_missing
 
@@ -169,7 +170,15 @@ async def create_complete_chassis(
     resolved_thread_store = thread_store
     if config.enable_buttons:
         if resolved_thread_store is None:
-            resolved_thread_store = SupportThreadStore()
+            if config.db_path and config.db_path != ":memory:":
+                resolved_thread_store = SqliteSupportThreadStore(
+                    config.db_path,
+                    tenant_bot_id=config.bot_id,
+                    origin_bot_id=resolved_origin(config),
+                    origin_telegram_bot_id=int(bot.id),
+                )
+            else:
+                resolved_thread_store = SupportThreadStore()
         resolved_support_inline = extra_support_inline or ()
         screens = UserScreenTracker()
 

@@ -570,7 +570,8 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertIn("merchant_origin_bot_id", tx_cols)
         self.assertIn("merchant_telegram_bot_id", tx_cols)
         self.assertTrue(
-            {"origin_bot_id", "origin_telegram_bot_id", "ticket_id", "message_role"}
+            {"origin_bot_id", "origin_telegram_bot_id", "ticket_id", "message_role",
+             "message_thread_id", "operator_id", "first_answered_at", "closed_at"}
             <= thread_cols
         )
         self.assertIn(

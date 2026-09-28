@@ -31,7 +31,7 @@ class _Bot:
         self._next_message_id += 1
         return message
 
-    async def copy_message(self, chat_id: int, from_chat_id: int, message_id: int):
+    async def copy_message(self, chat_id: int, from_chat_id: int, message_id: int, **_kwargs):
         self.sent.append(("copy", chat_id, message_id))
         message = SimpleNamespace(message_id=self._next_message_id)
         self._next_message_id += 1
@@ -39,6 +39,14 @@ class _Bot:
 
     async def delete_message(self, chat_id: int, message_id: int) -> None:
         self.deleted.append((chat_id, message_id))
+
+    async def edit_message_text(self, chat_id: int, message_id: int, text: str, **_kwargs):
+        self.sent.append(("edit", chat_id, text))
+        return SimpleNamespace(message_id=message_id)
+
+    async def edit_message_reply_markup(self, chat_id: int, message_id: int, **_kwargs):
+        self.sent.append(("markup", chat_id, message_id))
+        return True
 
 
 class _RaceStore:
@@ -84,12 +92,12 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bpd.mark_ticket_answered("ticket-1"), 2)
         closed = self.bpd.resolve_ticket(-100, 10)
         self.assertEqual(closed.ticket_id, "ticket-1")
-        self.assertEqual(closed.ticket_status, "answered")
+        self.assertEqual(closed.ticket_status, "in_progress")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_id, "ticket-2")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
         self.assertEqual(adhd.resolve_ticket(-100, 30).ticket_id, "ticket-3")
         self.assertEqual(self.bpd.resolve_user(-100, 20), 7)
-        self.assertIsNone(self.bpd.resolve_user(-100, 10))
+        self.assertEqual(self.bpd.resolve_user(-100, 10), 7)
 
         def _inspect(conn):
             user = conn.execute(
@@ -131,9 +139,9 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
             origin_bot, reply, self.bpd
         )
         self.assertTrue(success)
-        self.assertEqual(len(origin_bot.sent), 2)
+        self.assertEqual(len(origin_bot.sent), 3)
         closed = self.bpd.resolve_ticket(-100, 10)
-        self.assertEqual(closed.ticket_status, "answered")
+        self.assertEqual(closed.ticket_status, "in_progress")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_id, "ticket-2")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
 
@@ -177,13 +185,16 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
         self.assertEqual(self.bpd.resolve_user(-100, 10), 7)
         self.bpd.mark_ticket_answered("ticket-1")
+        self.assertEqual(self.bpd.resolve_user(-100, 10), 7)
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "in_progress")
+        self.bpd.close_ticket("ticket-1")
         self.assertIsNone(self.bpd.resolve_user(-100, 10))
-        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "closed")
 
     async def test_origin_reply_on_closed_ticket_is_already_answered(self) -> None:
         self.bpd.register(-100, 7, 10, 11, ticket_id="ticket-1")
         self.bpd.register(-100, 7, 20, 21, ticket_id="ticket-2")
-        self.bpd.mark_ticket_answered("ticket-1")
+        self.bpd.close_ticket("ticket-1")
         reply = SimpleNamespace(
             chat=SimpleNamespace(id=-100),
             message_id=500,
@@ -197,7 +208,7 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(success)
         self.assertEqual(status, "ALREADY_ANSWERED")
         self.assertEqual(origin_bot.sent, [])
-        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "closed")
         self.assertEqual(self.bpd.resolve_ticket(-100, 20).ticket_status, "open")
         self.assertEqual(self.bpd.mark_ticket_answered("ticket-1"), 0)
 
@@ -236,11 +247,12 @@ class TestSqliteSupportThreadStore(unittest.IsolatedAsyncioTestCase):
         delivered = [item for item in outcomes if item[1]]
         self.assertEqual(len(delivered), 1)
         self.assertEqual(delivered[0][0], 101)
-        self.assertEqual(len(delivered[0][3]), 2)
+        user_bound = [item for item in delivered[0][3] if item[1] == 7]
+        self.assertEqual(len(user_bound), 2)
         silent = [item for item in outcomes if not item[1]]
         self.assertEqual(len(silent), 6)
         self.assertTrue(all(item[2] == "FOREIGN_ORIGIN" and item[3] == [] for item in silent))
-        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "answered")
+        self.assertEqual(self.bpd.resolve_ticket(-100, 10).ticket_status, "in_progress")
 
         origin_again = _Bot(101)
         success, status = await deliver_support_reply_to_user(

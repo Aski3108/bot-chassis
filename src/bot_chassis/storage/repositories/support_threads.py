@@ -53,7 +53,8 @@ class SupportThreadsRepository:
                 SELECT COUNT(*) AS total
                 FROM support_threads
                 WHERE bot_id = ? AND user_id = ?
-                  AND ticket_status = 'open' AND message_role = 'header'
+                  AND ticket_status IN ('open', 'in_progress')
+                  AND message_role = 'header'
                 """,
                 (bot_id, user_id),
             ).fetchone()
@@ -80,14 +81,18 @@ class SupportThreadsRepository:
         return await self._engine.run(_op)
 
     async def mark_answered(self, bot_id: str, user_id: int) -> int:
+        """Первый ответ: open → in_progress. Слот не освобождается."""
         def _op(conn) -> int:
+            now = utc_now()
             cur = conn.execute(
                 """
                 UPDATE support_threads
-                SET ticket_status = 'answered', updated_at = ?
+                SET ticket_status = 'in_progress',
+                    first_answered_at = COALESCE(first_answered_at, ?),
+                    updated_at = ?
                 WHERE bot_id = ? AND user_id = ? AND ticket_status = 'open'
                 """,
-                (utc_now(), bot_id, user_id),
+                (now, now, bot_id, user_id),
             )
             return int(cur.rowcount)
 

@@ -182,7 +182,7 @@ class TestMountInvariants(unittest.IsolatedAsyncioTestCase):
                 enable_payments=False,
             ),
         )
-        self.assertIsInstance(default_chassis.thread_store, SupportThreadStore)
+        self.assertIsInstance(default_chassis.thread_store, SqliteSupportThreadStore)
         sqlite_store = SqliteSupportThreadStore(
             self.db_path,
             tenant_bot_id="tenant_x",
@@ -225,7 +225,7 @@ class TestMountInvariants(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(delivered)
         closed = sqlite_store.resolve_ticket(-100, 10)
         self.assertEqual(closed.ticket_id, "ticket-1")
-        self.assertEqual(closed.ticket_status, "answered")
+        self.assertEqual(closed.ticket_status, "in_progress")
         self.assertEqual(
             sqlite_store.resolve_ticket(-100, 20).ticket_id,
             "ticket-2",

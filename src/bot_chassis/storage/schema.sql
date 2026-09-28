@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_subs_user_active ON subscriptions(bot_id, user_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_subs_one_active
     ON subscriptions(bot_id, user_id, plan_code) WHERE status = 'active';
 
--- 5. Треды поддержки (схема готова, миграция с JSON позже)
+-- 5. Треды поддержки (маршрутизация; текст и медиа не хранятся)
 CREATE TABLE IF NOT EXISTS support_threads (
     bot_id TEXT NOT NULL,
     support_chat_id INTEGER NOT NULL,
@@ -88,13 +88,34 @@ CREATE TABLE IF NOT EXISTS support_threads (
     origin_telegram_bot_id INTEGER NOT NULL DEFAULT 0,
     ticket_id TEXT NOT NULL DEFAULT '',
     message_role TEXT NOT NULL DEFAULT 'header', -- 'header' | 'copy'
-    ticket_status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'answered' | 'closed'
+    ticket_status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'in_progress' | 'closed'
+    message_thread_id INTEGER,
+    operator_id INTEGER,
+    first_answered_at TEXT,
+    closed_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (bot_id, support_chat_id, support_message_id),
+    CHECK (ticket_status IN ('open', 'in_progress', 'closed')),
     FOREIGN KEY (bot_id, user_id) REFERENCES users(bot_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_support_user ON support_threads(bot_id, user_id, ticket_status);
+CREATE INDEX IF NOT EXISTS idx_support_ticket ON support_threads(bot_id, ticket_id);
+
+-- 5b. Метаданные сообщений тикета (без текста и медиа)
+CREATE TABLE IF NOT EXISTS support_ticket_messages (
+    bot_id TEXT NOT NULL,
+    ticket_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    telegram_chat_id INTEGER NOT NULL,
+    telegram_message_id INTEGER NOT NULL,
+    message_thread_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (bot_id, telegram_chat_id, telegram_message_id),
+    CHECK (direction IN ('user_to_support', 'support_to_user'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_ticket_messages
+    ON support_ticket_messages(bot_id, ticket_id);
 
 -- 6. Системные настройки и флаги шасси (Рубильник)
 CREATE TABLE IF NOT EXISTS bot_settings (

@@ -38,6 +38,9 @@ from .contracts import (
     CB_SUPPORT_BACK,
     CB_SUPPORT_HUB,
     CB_NAV_CLOSE,
+    CB_SUPPORT_TICKET_CLOSE_PREFIX,
+    CB_SUPPORT_TICKET_REOPEN_PREFIX,
+    CB_SUPPORT_USER_REPLY_PREFIX,
 )
 from .keyboards import (
     build_main_menu_keyboard,
@@ -53,8 +56,12 @@ from .localization import ChassisScreen, MarkupContext, decorate_info_markup
 from .support_bridge import (
     SupportThreadStore,
     send_user_report_to_support,
+    send_user_followup_to_support,
     deliver_support_reply_to_user,
+    refresh_operator_card,
+    store_supports_continuation,
 )
+from .storage.sqlite_support_thread_store import TicketLimitExceeded
 
 
 class SupportTicketActiveFilter(Filter):
@@ -79,7 +86,11 @@ class SupportTicketActiveFilter(Filter):
         if is_main_menu_button(message.text, domain_labels=self.domain_labels):
             self.store.clear(message.from_user.id)
             return False
-        return self.store.is_active(message.from_user.id, PendingInputKind.SUPPORT_MESSAGE)
+        pending = self.store.get(message.from_user.id)
+        return pending is not None and pending.kind in {
+            PendingInputKind.SUPPORT_MESSAGE,
+            PendingInputKind.SUPPORT_REPLY,
+        }
 
 
 def create_button_chassis_router(
@@ -422,6 +433,70 @@ def create_button_chassis_router(
                 except Exception:
                     await query.message.edit_reply_markup(reply_markup=None)
 
+        @router.callback_query(F.data.startswith(CB_SUPPORT_USER_REPLY_PREFIX))
+        async def handle_support_user_reply(query: types.CallbackQuery):
+            user_id = query.from_user.id if query.from_user else 0
+            ticket_id = (query.data or "")[len(CB_SUPPORT_USER_REPLY_PREFIX):]
+            get_ticket = getattr(threads, "get_ticket", None)
+            ticket = get_ticket(ticket_id) if callable(get_ticket) else None
+            if ticket is None or ticket.user_id != user_id:
+                await query.answer("Обращение не найдено", show_alert=True)
+                return
+            if ticket.ticket_status not in {"open", "in_progress"}:
+                await query.answer("Обращение уже закрыто", show_alert=True)
+                return
+            chat_id = query.message.chat.id if query.message else user_id
+            pending.set(
+                user_id,
+                PendingInput(
+                    kind=PendingInputKind.SUPPORT_REPLY,
+                    origin_chat_id=chat_id,
+                    ticket_id=ticket_id,
+                ),
+            )
+            await query.answer()
+            await _edit_or_answer(
+                query,
+                (
+                    f"💬 <b>Ответ в обращение</b>\n\n"
+                    "Можно отправить текст, изображение, видео, голосовое сообщение или документ.\n\n"
+                    "<i>Сообщение уйдёт в тот же диалог. Отмена сбрасывает ожидание.</i>"
+                ),
+                _request_markup(),
+            )
+
+        @router.callback_query(F.data.startswith(CB_SUPPORT_TICKET_CLOSE_PREFIX))
+        async def handle_support_ticket_close(query: types.CallbackQuery):
+            if not store_supports_continuation(threads):
+                await query.answer()
+                return
+            ticket_id = (query.data or "")[len(CB_SUPPORT_TICKET_CLOSE_PREFIX):]
+            close_ticket = getattr(threads, "close_ticket", None)
+            changed = close_ticket(ticket_id) if callable(close_ticket) else 0
+            if not changed:
+                await query.answer("Обращение уже закрыто")
+                return
+            await query.answer("Обращение закрыто")
+            await refresh_operator_card(query.bot, threads, ticket_id, project_label)
+
+        @router.callback_query(F.data.startswith(CB_SUPPORT_TICKET_REOPEN_PREFIX))
+        async def handle_support_ticket_reopen(query: types.CallbackQuery):
+            if not store_supports_continuation(threads):
+                await query.answer()
+                return
+            ticket_id = (query.data or "")[len(CB_SUPPORT_TICKET_REOPEN_PREFIX):]
+            reopen_ticket = getattr(threads, "reopen_ticket", None)
+            try:
+                changed = reopen_ticket(ticket_id) if callable(reopen_ticket) else 0
+            except TicketLimitExceeded:
+                await query.answer("Лимит активных обращений", show_alert=True)
+                return
+            if not changed:
+                await query.answer("Нельзя открыть снова")
+                return
+            await query.answer("Обращение открыто снова")
+            await refresh_operator_card(query.bot, threads, ticket_id, project_label)
+
     # ----------------------------------------------------------------------
     # 5. ОБЩИЕ ИНЛАЙН-ОБРАБОТЧИКИ
     # ----------------------------------------------------------------------
@@ -443,6 +518,7 @@ def create_button_chassis_router(
         @router.message(SupportTicketActiveFilter(pending, domain_labels=domain_labels))
         async def handle_user_support_ticket(message: types.Message):
             user_id = message.from_user.id if message.from_user else 0
+            waiting = pending.get(user_id)
             pending.clear(user_id)
 
             if not support_chat_id:
@@ -451,14 +527,26 @@ def create_button_chassis_router(
                 )
                 return
 
-            copied_id = await send_user_report_to_support(
-                bot=message.bot,
-                support_chat_id=support_chat_id,
-                user_message=message,
-                thread_store=threads,
-                project_label=project_label,
-                message_thread_id=support_thread_id,
-            )
+            if (
+                waiting is not None
+                and waiting.kind == PendingInputKind.SUPPORT_REPLY
+                and waiting.ticket_id
+            ):
+                copied_id = await send_user_followup_to_support(
+                    bot=message.bot,
+                    user_message=message,
+                    thread_store=threads,
+                    ticket_id=waiting.ticket_id,
+                )
+            else:
+                copied_id = await send_user_report_to_support(
+                    bot=message.bot,
+                    support_chat_id=support_chat_id,
+                    user_message=message,
+                    thread_store=threads,
+                    project_label=project_label,
+                    message_thread_id=support_thread_id,
+                )
             if copied_id:
                 # Чек тикета НЕ должен быть новым носителем клавиатуры
                 await message.answer(
@@ -482,6 +570,7 @@ def create_button_chassis_router(
                 admin_reply_message=message,
                 thread_store=threads,
                 expected_thread_id=support_thread_id,
+                project_label=project_label,
             )
             if not success:
                 # Если ответ не привязан к тикету (админы переписываются между собой) — тишина

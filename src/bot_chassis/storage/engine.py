@@ -111,11 +111,34 @@ class StorageEngine:
                     conn,
                     "ALTER TABLE support_threads ADD COLUMN message_role TEXT NOT NULL DEFAULT 'header'",
                 )
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE support_threads ADD COLUMN message_thread_id INTEGER",
+                )
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE support_threads ADD COLUMN operator_id INTEGER",
+                )
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE support_threads ADD COLUMN first_answered_at TEXT",
+                )
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE support_threads ADD COLUMN closed_at TEXT",
+                )
                 conn.execute(
                     """
                     UPDATE support_threads
                     SET origin_bot_id = bot_id
                     WHERE origin_bot_id = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE support_threads
+                    SET ticket_status = 'closed'
+                    WHERE ticket_status = 'answered'
                     """
                 )
             if _table_exists(conn, "user_bot_statuses"):
