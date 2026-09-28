@@ -18,6 +18,7 @@ def register_chassis_middlewares(
     locale_cache: dict[int, str] | None = None,
     locale_policy: InitialLocalePolicy | None = None,
     locale_resolver=None,
+    bot_display_name_provider=None,
 ) -> dict[int, str]:
     """Самый внешний — ErrorAlert. Первый зарегистрированный outer видит Update раньше."""
     cache = {} if locale_cache is None else locale_cache
@@ -31,6 +32,7 @@ def register_chassis_middlewares(
             locale_cache=cache,
             locale_policy=locale_policy,
             locale_resolver=locale_resolver,
+            bot_display_name_provider=bot_display_name_provider,
         )
     )
     return cache

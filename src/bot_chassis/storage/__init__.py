@@ -13,6 +13,7 @@ from .repositories.roles import RolesRepository
 from .repositories.subscriptions import SubscriptionsRepository
 from .repositories.support_threads import SupportThreadsRepository
 from .repositories.transactions import TransactionsRepository, VoucherRecord
+from .repositories.user_bot_statuses import UserBotStatusRepository
 from .repositories.users import UserRecord, UsersRepository
 
 
@@ -26,6 +27,7 @@ class Storage:
     support_threads: SupportThreadsRepository
     bot_settings: BotSettingsRepository
     referrals: ReferralsRepository
+    bot_statuses: UserBotStatusRepository
 
 
 async def create_storage(config: BotChassisConfig) -> Storage:
@@ -33,6 +35,7 @@ async def create_storage(config: BotChassisConfig) -> Storage:
     await engine.initialize()
     users = UsersRepository(engine)
     roles = RolesRepository(engine, users)
+    bot_statuses = UserBotStatusRepository(engine)
     storage = Storage(
         engine=engine,
         users=users,
@@ -42,6 +45,7 @@ async def create_storage(config: BotChassisConfig) -> Storage:
         support_threads=SupportThreadsRepository(engine),
         bot_settings=BotSettingsRepository(engine),
         referrals=ReferralsRepository(engine, users),
+        bot_statuses=bot_statuses,
     )
     await roles.seed_superadmins(config.bot_id, config.superadmin_ids)
     return storage

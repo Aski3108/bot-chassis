@@ -12,7 +12,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from .admin.router import create_admin_router
-from .config import BotChassisConfig
+from .config import BotChassisConfig, resolved_origin
 from .dispatcher import ActiveTaskTracker
 from .followup import PendingInputStore
 from .keyboards import build_main_menu_keyboard
@@ -35,6 +35,7 @@ from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
 from .router import create_button_chassis_router
 from .storage import Storage, create_storage
 from .support_bridge import SupportThreadStore
+from .user_lifecycle import register_membership_handler, warn_if_my_chat_member_missing
 
 _MENU_TEXT = "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:"
 _START_CARRIER_TEXT = "Главное меню"
@@ -92,11 +93,16 @@ async def create_complete_chassis(
     on_locale_changed=None,
     initial_locale_policy: InitialLocalePolicy | None = None,
     initial_locale_resolver: Callable[[str | None], str] | None = None,
+    bot_display_name_provider=None,
+    allowed_updates: Sequence[str] | None = None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
     if dp is None:
         dp = Dispatcher()
+    storage.bot_statuses.bind_process(resolved_origin(config), int(bot.id))
+    warn_if_my_chat_member_missing(allowed_updates)
+    register_membership_handler(dp, storage, config)
 
     if config.enable_buttons and domain_router is not None and _router_handles_start(domain_router):
         raise ValueError(
@@ -109,6 +115,7 @@ async def create_complete_chassis(
         storage=storage,
         locale_policy=initial_locale_policy,
         locale_resolver=initial_locale_resolver,
+        bot_display_name_provider=bot_display_name_provider,
     )
     work_gate = DefaultWorkGateAdapter(storage.bot_settings, storage.users)
     access = DefaultAccessAdapter(storage.subscriptions)
@@ -132,6 +139,7 @@ async def create_complete_chassis(
                 extra_actions=extra_admin_actions,
                 extra_user_dossier_lines=extra_user_dossier_lines,
                 extra_user_dossier_rows=extra_user_dossier_rows,
+                bot_display_name_provider=bot_display_name_provider,
             )
         )
     if config.enable_payments:

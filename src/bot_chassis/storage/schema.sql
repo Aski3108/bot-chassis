@@ -118,3 +118,22 @@ CREATE TABLE IF NOT EXISTS referrals (
     FOREIGN KEY (bot_id, referee_id) REFERENCES users(bot_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(bot_id, referrer_id);
+
+-- 8. Telegram-статус пользователя в конкретном боте.
+-- unknown в базу не пишется: это отсутствие ряда.
+CREATE TABLE IF NOT EXISTS user_bot_statuses (
+    bot_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    origin_bot_id TEXT NOT NULL,
+    telegram_bot_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    status_changed_at TEXT NOT NULL,
+    last_error_code TEXT,
+    PRIMARY KEY (bot_id, user_id, telegram_bot_id),
+    CHECK (status IN ('active', 'stopped', 'deleted')),
+    FOREIGN KEY (bot_id, user_id) REFERENCES users(bot_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_bot_statuses_user
+    ON user_bot_statuses(bot_id, user_id);

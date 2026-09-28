@@ -7,13 +7,14 @@ import html
 from dataclasses import dataclass
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
 from ..config import BotChassisConfig
 from ..storage import Storage
+from ..user_lifecycle import classify_delivery_error, record_delivery_outcome
 from .audit import send_admin_audit
 
 CB_BROADCAST = "adm_bcast"
@@ -148,7 +149,7 @@ def _stop_keyboard() -> InlineKeyboardMarkup:
 
 async def _run_broadcast(bot, storage: Storage, config: BotChassisConfig, bot_id: str, actor_id: int, session: BroadcastSession) -> None:
     async with _BROADCAST_LOCK:
-        recipients = await storage.users.get_broadcast_user_ids(bot_id)
+        recipients = await storage.users.get_broadcast_user_ids(bot_id, bot.id)
         total = len(recipients)
         await send_admin_audit(bot, config, f"Старт рассылки. user_id={actor_id} получателей={total}")
         status = await bot.send_message(
@@ -170,6 +171,14 @@ async def _run_broadcast(bot, storage: Storage, config: BotChassisConfig, bot_id
                 delivered += 1
             else:
                 errors += 1
+                if outcome in {"stopped", "deleted"}:
+                    await record_delivery_outcome(
+                        storage,
+                        config,
+                        user_id=user_id,
+                        telegram_bot_id=bot.id,
+                        outcome=outcome,
+                    )
             if index + 1 < total and not session.cancel:
                 await asyncio.sleep(BROADCAST_INTERVAL)
         title = "📢 Рассылка остановлена" if session.cancel else "📢 Рассылка завершена"
@@ -192,9 +201,10 @@ async def _send_one(bot, user_id: int, text: str) -> str:
         except TelegramRetryAfter as exc:
             await asyncio.sleep(exc.retry_after * factor)
             factor *= 2
-        except TelegramForbiddenError:
-            return "error"
-        except Exception:
+        except Exception as exc:
+            outcome = classify_delivery_error(exc)
+            if outcome is not None:
+                return outcome
             logger.exception(f"Рассылка не доставлена user_id={user_id}")
             return "error"
     return "error"

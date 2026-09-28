@@ -1040,7 +1040,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             await self._feed_callback(14, CB_BROADCAST_GO, 16, panel)
             halted = [item for item in self._named("SendMessage") if item.text == "halt"]
             self.assertEqual([item.chat_id for item in halted], [14])
-            self.assertTrue(any("остановлено=2" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
+            self.assertTrue(any("остановлено=1" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
             self.session.make_request = original
 
             self.session.requests.clear()

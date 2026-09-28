@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from bot_chassis.commands import register_button_chassis_startup
 from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.factory import CompleteChassis, create_complete_chassis
+from bot_chassis.user_lifecycle import CANON_ALLOWED_UPDATES
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,7 +123,7 @@ async def main() -> None:
         body.chassis = chassis
         register_button_chassis_startup(chassis.dp, bot)
         logger.info("Полная рама запущена. Остановка: Ctrl+C.")
-        await chassis.dp.start_polling(bot)
+        await chassis.dp.start_polling(bot, allowed_updates=list(CANON_ALLOWED_UPDATES))
     finally:
         await bot.session.close()
 

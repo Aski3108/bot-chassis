@@ -24,6 +24,7 @@ from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from ..config import BotChassisConfig, resolved_origin
+from ..user_lifecycle import STATUS_LABELS
 from ..ports.admin_extra import ExtraAdminActions
 from ..storage import Storage
 from .audit import send_admin_audit
@@ -77,6 +78,7 @@ def create_admin_router(
     *,
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
+    bot_display_name_provider=None,
 ) -> Router:
     router = Router(name="admin")
     staff = AdminRoleFilter(bot_id, storage.roles)
@@ -258,6 +260,7 @@ def create_admin_router(
             target_id,
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
         )
         if card is None:
             await _reply(message, USER_NOT_FOUND)
@@ -293,6 +296,7 @@ def create_admin_router(
             target_id,
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
         )
         await call.answer()
 
@@ -627,6 +631,7 @@ async def _dossier(
     user_id: int,
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
+    bot_display_name_provider=None,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
     user = await storage.users.get_user(bot_id, user_id)
     if user is None:
@@ -637,11 +642,41 @@ async def _dossier(
     payments = await _paid_count(storage, bot_id, user_id)
     referrals = await storage.referrals.get_referrals_count(bot_id, user_id)
     text = _dossier_text(user, roles, subscription, len(vouchers), payments, referrals)
+    text = text + "\n" + await _lifecycle_lines(storage, bot_id, user, bot_display_name_provider)
     extra_lines = await _invoke_user_port(extra_user_dossier_lines, user_id)
     if extra_lines:
         text = text + "\n" + "\n".join(extra_lines)
     extra_rows = await _invoke_user_port(extra_user_dossier_rows, user_id)
     return text, _dossier_keyboard(user, "admin" in roles, extra_rows=extra_rows or ())
+
+
+async def _lifecycle_lines(storage: Storage, bot_id: str, user, provider) -> str:
+    parts = []
+    if user.is_banned:
+        parts.append("бан")
+    if user.is_shadow_banned:
+        parts.append("теневой бан")
+    lines = ["Санкции сети: " + (", ".join(parts) if parts else "нет")]
+    known = await storage.bot_statuses.list_known_bots(bot_id)
+    statuses = {
+        item.telegram_bot_id: item
+        for item in await storage.bot_statuses.list_for_user(bot_id, user.user_id)
+    }
+    for bot in known:
+        label = await _bot_label(provider, bot.origin_bot_id, bot.telegram_bot_id)
+        row = statuses.get(bot.telegram_bot_id)
+        state = STATUS_LABELS[row.status] if row is not None else "неизвестно"
+        lines.append(f"{html.escape(label)}: {state}")
+    return "\n".join(lines)
+
+
+async def _bot_label(provider, origin_bot_id: str, telegram_bot_id: int) -> str:
+    if provider is None:
+        return origin_bot_id
+    result = provider(origin_bot_id, telegram_bot_id)
+    if inspect.isawaitable(result):
+        result = await result
+    return str(result) if result else origin_bot_id
 
 
 def _dossier_text(user, roles: list[str], subscription, vouchers: int, payments: int, referrals: int) -> str:
@@ -766,6 +801,7 @@ async def _edit_dossier(
     user_id: int,
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
+    bot_display_name_provider=None,
 ) -> None:
     message = call.message
     if message is None or isinstance(message, InaccessibleMessage):
@@ -776,6 +812,7 @@ async def _edit_dossier(
         user_id,
         extra_user_dossier_lines=extra_user_dossier_lines,
         extra_user_dossier_rows=extra_user_dossier_rows,
+        bot_display_name_provider=bot_display_name_provider,
     )
     if card is None:
         return

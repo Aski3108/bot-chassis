@@ -41,6 +41,7 @@ from aiogram import Bot, Dispatcher, Router
 from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.commands import register_button_chassis_startup
+from bot_chassis.user_lifecycle import CANON_ALLOWED_UPDATES
 
 config = BotChassisConfig(
     bot_id="shop",
@@ -75,10 +76,12 @@ async def main(bot: Bot) -> None:
         extra_user_dossier_rows=None,
     )
     register_button_chassis_startup(chassis.dp, bot)
-    await chassis.dp.start_polling(bot)
+    await chassis.dp.start_polling(bot, allowed_updates=list(CANON_ALLOWED_UPDATES))
 ```
 
 Эталон: [`examples/run_complete_chassis.py`](../examples/run_complete_chassis.py), переменные — [`examples/.env.example`](../examples/.env.example).
+
+Polling и webhook передают `my_chat_member` в `allowed_updates`. Без этого события блокировка бота не станет `stopped`, пока доставка сама не получит ошибку. Если кузов передал в фабрику свой список без `my_chat_member`, старт пишет предупреждение. Статус `active` / `stopped` / `deleted` хранится отдельно для каждого фактического бота. Бан и теневой бан остаются санкцией всей сети. Нет ряда — статус `unknown`. Первый запуск в этом боте один раз пишет событие в events-тему; повторный `/start` его не повторяет.
 
 Только кнопки: `create_button_chassis_router` из `bot_chassis` и [`examples/run_example.py`](../examples/run_example.py). Этот пример не наращивать.
 
@@ -169,6 +172,8 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `on_locale_changed` | `None` | После ручной смены языка. `None` — рама обновляет только свои экраны |
 | `initial_locale_policy` | группа RU из плана | Базовые коды Telegram, которые дают `ru`; остальное → `en` |
 | `initial_locale_resolver` | `None` | Замена политики. `None` — штатный разбор `language_code` |
+| `bot_display_name_provider` | `None` | Подпись бота в досье и событии первого запуска. `None` — `origin_bot_id` |
+| `allowed_updates` | `None` | Список кузова для диагностики. Без `my_chat_member` старт предупреждает, что мгновенный `stopped` не придёт |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 

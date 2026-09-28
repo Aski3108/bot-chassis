@@ -214,16 +214,35 @@ class UsersRepository:
 
         return await self._engine.run(_op)
 
-    async def get_broadcast_user_ids(self, bot_id: str) -> list[int]:
+    async def get_broadcast_user_ids(self, bot_id: str, telegram_bot_id: int | None = None) -> list[int]:
+        """Без telegram_bot_id — прежний список. С ним пропускаются stopped и deleted этого бота."""
+
         def _op(conn) -> list[int]:
-            rows = conn.execute(
-                """
-                SELECT user_id FROM users
-                WHERE bot_id = ? AND is_banned = 0 AND is_shadow_banned = 0
-                ORDER BY user_id ASC
-                """,
-                (bot_id,),
-            ).fetchall()
+            if telegram_bot_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT user_id FROM users
+                    WHERE bot_id = ? AND is_banned = 0 AND is_shadow_banned = 0
+                    ORDER BY user_id ASC
+                    """,
+                    (bot_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT user_id FROM users AS u
+                    WHERE u.bot_id = ? AND u.is_banned = 0 AND u.is_shadow_banned = 0
+                      AND NOT EXISTS (
+                          SELECT 1 FROM user_bot_statuses AS s
+                          WHERE s.bot_id = u.bot_id
+                            AND s.user_id = u.user_id
+                            AND s.telegram_bot_id = ?
+                            AND s.status IN ('stopped', 'deleted')
+                      )
+                    ORDER BY u.user_id ASC
+                    """,
+                    (bot_id, telegram_bot_id),
+                ).fetchall()
             return [int(row["user_id"]) for row in rows]
 
         return await self._engine.run(_op)

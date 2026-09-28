@@ -3,7 +3,7 @@
 **Дата:** 2026-09-28
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** коммит Gate 2 `feat(routing): add service topic routing` (поверх B1 `fef20b7`)
+**HEAD:** коммит Gate 3 `feat(users): track per-bot lifecycle` (поверх коррекции Gate 2 `5df45ad`)
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.2.2` (tag `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112`)
 **Profiling hold:** tag `profiling` = `6823f30`
@@ -108,7 +108,9 @@ Gate 1 и Gate 1A выполнены на `feat/chassis-0.3`; повторный
 поддержки с текущим конфигом. Оба дефекта исправлены: fallback идёт без темы,
 а Reply сверяется с темой исходного сообщения. Повторный аудит Gate 2: PASS.
 Узкий контур: 58 passed; полный сьют: 137 passed; `git diff --check` чистый.
-Независимый аудит B2 наступает после Gate 3. Gate 3 не начат. Push не делался.
+Gate 3 выполнен. Статус Telegram хранится отдельно по каждому боту.
+Полный сьют после Gate 3: 145 passed. Следующий шаг — независимый аудит B2.
+Gate 4 не начат. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен
