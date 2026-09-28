@@ -7,6 +7,7 @@ from .cabinet import (
     DefaultCabinetSlotsAdapter,
     build_cabinet_renderer,
 )
+from .donations import DonationCatalogPort, resolve_donation_items
 from .payments import (
     DefaultVoucherManagerAdapter,
     SkuVoucher,
@@ -25,10 +26,12 @@ __all__ = [
     "DefaultReferralAdapter",
     "DefaultVoucherManagerAdapter",
     "DefaultWorkGateAdapter",
+    "DonationCatalogPort",
     "ReferralPort",
     "SkuVoucher",
     "SkuVoucherConsumerPort",
     "VoucherManagerPort",
     "WorkGatePort",
     "build_cabinet_renderer",
+    "resolve_donation_items",
 ]

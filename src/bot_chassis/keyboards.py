@@ -17,7 +17,7 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
-from .contracts import MenuLabels, CB_NAV_CLOSE, CB_SUPPORT_CANCEL
+from .contracts import MenuLabels, CB_NAV_CLOSE, CB_SUPPORT_CANCEL, CB_SUPPORT_HUB
 
 
 def build_main_menu_keyboard(
@@ -84,12 +84,29 @@ def build_inline_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
+def build_support_overview_keyboard(
+    *,
+    show_review: bool = False,
+    show_donate: bool = False,
+) -> InlineKeyboardMarkup:
+    """Обзор поддержки: запрос, опционально отзыв и донат, назад на старт."""
+    rows = [[InlineKeyboardButton(text="📝 Запрос в поддержку", callback_data="core_sup:request")]]
+    if show_review:
+        rows.append([InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data="core_sup:review")])
+    if show_donate:
+        rows.append([InlineKeyboardButton(text="💛 Поддержать проект", callback_data="core_sup:donate")])
+    rows.append([InlineKeyboardButton(text="← Назад", callback_data="core_sup:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_support_prompt_keyboard(
     cancel_callback: str = CB_SUPPORT_CANCEL,
-    cancel_label: str = "🔙 Отмена",
+    cancel_label: str = "Отмена",
     extra_rows: Sequence[Sequence[tuple[str, str]]] | None = None,
+    back_callback: str = CB_SUPPORT_HUB,
+    back_label: str = "Назад",
 ) -> InlineKeyboardMarkup:
-    """Инлайн-клавиатура экрана ожидания ввода тикета поддержки (кнопка отмены)."""
+    """Карточка ожидания нового обращения: без донатных SKU, с отменой и назад."""
     rows = [
         [
             InlineKeyboardButton(text=text, url=value)
@@ -100,10 +117,26 @@ def build_support_prompt_keyboard(
         for row in (extra_rows or ())
         if row
     ]
-    rows.append([InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback)])
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
+    rows.append(
+        [
+            InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback),
+            InlineKeyboardButton(text=back_label, callback_data=back_callback),
+        ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_donation_keyboard(
+    items: Sequence[tuple[str, str]],
+    back_callback: str = CB_SUPPORT_HUB,
+) -> InlineKeyboardMarkup:
+    """Каталог донатов. Пустой список не вызывают: кнопку скрывает обзор."""
+    rows = [
+        [InlineKeyboardButton(text=title, callback_data=callback)]
+        for title, callback in items
+    ]
+    rows.append([InlineKeyboardButton(text="← Назад", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_close_inline_keyboard(

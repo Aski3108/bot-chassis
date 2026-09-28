@@ -48,6 +48,7 @@ from .followup import (
     PendingInput,
     PendingInputKind,
     PendingInputStore,
+    PendingScope,
 )
 from .commands import (
     setup_bot_commands,
@@ -95,6 +96,7 @@ __all__ = [
     "PendingInput",
     "PendingInputKind",
     "PendingInputStore",
+    "PendingScope",
     "setup_bot_commands",
     "register_button_chassis_startup",
     "SupportThreadStore",

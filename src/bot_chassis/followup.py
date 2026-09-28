@@ -1,8 +1,7 @@
 """Хранилище временных состояний ожидания ввода (Button Chassis).
 
-Позволяет безопасно обрабатывать пользовательский ввод (тикеты поддержки,
-текстовые ответы) с гарантированным TTL (по умолчанию 15 минут) и мгновенным
-сбросом при нажатии любой навигационной кнопки меню.
+Ожидания разделены по scopes: пользовательская навигация не стирает
+админский поиск, рассылку и доменный ввод кузова.
 """
 
 from __future__ import annotations
@@ -12,10 +11,20 @@ from enum import Enum
 from typing import Optional
 
 
+class PendingScope(str, Enum):
+    """Контуры ожидания ввода. Старый вызов без scope работает как USER."""
+
+    USER = "user_navigation"
+    ADMIN = "admin_navigation"
+    BROADCAST = "broadcast"
+    DOMAIN = "domain"
+
+
 class PendingInputKind(str, Enum):
     """Типы ожидаемого пользовательского ввода."""
-    SUPPORT_MESSAGE = "support_message"    # Пользователь пишет обращение в поддержку
-    CUSTOM_INPUT = "custom_input"          # Расширяемый тип для доменных сценариев
+    SUPPORT_MESSAGE = "support_message"
+    CUSTOM_INPUT = "custom_input"
+    ADMIN_LOOKUP = "admin_lookup"
 
 
 @dataclass(slots=True, frozen=True)
@@ -25,6 +34,7 @@ class PendingInput:
     target_user_id: Optional[int] = None
     origin_chat_id: Optional[int] = None
     origin_message_id: Optional[int] = None
+    ticket_id: Optional[str] = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -35,42 +45,52 @@ class PendingInputStore:
     """
     def __init__(self, ttl_seconds: float = 900.0) -> None:
         self.ttl_seconds = ttl_seconds
-        self._items: dict[int, PendingInput] = {}
+        self._items: dict[tuple[str, int], PendingInput] = {}
+
+    def _key(self, user_id: int, scope: PendingScope | str | None) -> tuple[str, int]:
+        if scope is None:
+            name = PendingScope.USER.value
+        elif isinstance(scope, PendingScope):
+            name = scope.value
+        else:
+            name = scope
+        return name, user_id
 
     def _is_expired(self, item: PendingInput) -> bool:
         return (time.time() - item.created_at) > self.ttl_seconds
 
-    def get(self, user_id: int) -> Optional[PendingInput]:
+    def get(self, user_id: int, kind: Optional[PendingInputKind] = None, *, scope: PendingScope | str | None = None) -> Optional[PendingInput]:
         """Возвращает текущую запись ввода, если она не истекла по TTL."""
-        item = self._items.get(user_id)
+        key = self._key(user_id, scope)
+        item = self._items.get(key)
         if not item:
             return None
         if self._is_expired(item):
-            self._items.pop(user_id, None)
+            self._items.pop(key, None)
+            return None
+        if kind is not None and item.kind != kind:
             return None
         return item
 
-    def set(self, user_id: int, pending_input: PendingInput) -> None:
-        """Устанавливает режим ожидания ввода."""
-        self._items[user_id] = pending_input
+    def set(self, user_id: int, pending_input: PendingInput, *, scope: PendingScope | str | None = None) -> None:
+        """Устанавливает режим ожидания ввода в выбранном scope."""
+        self._items[self._key(user_id, scope)] = pending_input
 
-    def clear(self, user_id: int) -> Optional[PendingInput]:
-        """Очищает режим ожидания ввода и возвращает удалённое значение."""
-        return self._items.pop(user_id, None)
+    def clear(self, user_id: int, *, scope: PendingScope | str | None = None) -> Optional[PendingInput]:
+        """Очищает только указанный scope и не трогает соседние контуры."""
+        return self._items.pop(self._key(user_id, scope), None)
 
-    def is_active(self, user_id: int, kind: Optional[PendingInputKind] = None) -> bool:
+    def is_active(self, user_id: int, kind: Optional[PendingInputKind] = None, *, scope: PendingScope | str | None = None) -> bool:
         """Проверяет активность режима ввода с учётом TTL."""
-        item = self.get(user_id)
-        if not item:
-            return False
-        if kind is not None and item.kind != kind:
-            return False
-        return True
+        return self.get(user_id, kind, scope=scope) is not None
 
     def purge_expired(self) -> int:
         """Периодическая очистка протухших записей. Возвращает количество удалённых."""
         now = time.time()
-        expired_keys = [uid for uid, item in self._items.items() if (now - item.created_at) > self.ttl_seconds]
-        for uid in expired_keys:
-            self._items.pop(uid, None)
+        expired_keys = [
+            key for key, item in self._items.items()
+            if (now - item.created_at) > self.ttl_seconds
+        ]
+        for key in expired_keys:
+            self._items.pop(key, None)
         return len(expired_keys)

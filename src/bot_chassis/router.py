@@ -33,14 +33,21 @@ from .contracts import (
     is_main_menu_button,
     extract_domain_labels,
     CB_SUPPORT_CANCEL,
+    CB_SUPPORT_REQUEST,
+    CB_SUPPORT_DONATE,
+    CB_SUPPORT_BACK,
+    CB_SUPPORT_HUB,
     CB_NAV_CLOSE,
 )
 from .keyboards import (
     build_main_menu_keyboard,
     build_support_prompt_keyboard,
+    build_support_overview_keyboard,
+    build_donation_keyboard,
 )
 from .lifecycle import UserScreenTracker, CardClosePolicy
 from .dispatcher import ActiveTaskTracker
+from .config import SkuItem
 from .followup import PendingInputStore, PendingInput, PendingInputKind
 from .localization import ChassisScreen, MarkupContext, decorate_info_markup
 from .support_bridge import (
@@ -97,6 +104,10 @@ def create_button_chassis_router(
     before_chassis_menu_action: Optional[Callable[[int], Awaitable[None]]] = None,
     language_switch_enabled: bool = False,
     support_thread_id: int | None = None,
+    donation_items: Sequence[SkuItem] = (),
+    donation_hint: str | None = None,
+    review_enabled: bool = False,
+    on_support_back: Optional[Callable[[types.Message, int], Awaitable[None]]] = None,
 ) -> Router:
     """
     Фабрика универсального роутера шасси кнопок.
@@ -267,51 +278,138 @@ def create_button_chassis_router(
             await _open_info(message)
 
     # ----------------------------------------------------------------------
-    # 4. РАЗДЕЛ: [💬 Поддержка] (кнопка меню и команда /support)
+    # 4. РАЗДЕЛ: [💬 Поддержка] — обзор, скрытый /support сразу в форму
     # ----------------------------------------------------------------------
     if enable_support:
         support_aliases = {BTN_SUPPORT_RU, BTN_SUPPORT_EN, "Поддержка", "Служба поддержки", "🛟 Поддержка", "Report", "Support"}
+        donate_rows = tuple(
+            (f"{sku.title} — {sku.stars_price} ⭐", f"buy_sku:{sku.sku_code}")
+            for sku in donation_items
+        )
 
-        async def _open_support(message: types.Message):
-            user_id = message.from_user.id if message.from_user else 0
+        def _overview_markup() -> types.InlineKeyboardMarkup:
+            return build_support_overview_keyboard(
+                show_review=review_enabled,
+                show_donate=bool(donate_rows),
+            )
+
+        def _request_markup() -> types.InlineKeyboardMarkup:
+            return build_support_prompt_keyboard(
+                cancel_callback=CB_SUPPORT_CANCEL,
+                extra_rows=extra_support_inline,
+            )
+
+        def _overview_text() -> str:
+            return (
+                f"💬 <b>Поддержка ({project_label})</b>\n\n"
+                "Выберите действие."
+            )
+
+        def _request_text() -> str:
+            return (
+                f"💬 <b>Служба поддержки ({project_label})</b>\n\n"
+                "Можно отправить текст, изображение, видео, голосовое сообщение или документ.\n\n"
+                "<i>Отмена или пункт меню сбрасывают ожидание. Назад возвращает к обзору.</i>"
+            )
+
+        async def _remember(user_id: int, sent: types.Message) -> None:
+            screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=CardClosePolicy.DELETE)
+
+        async def _edit_or_answer(event: types.Message | types.CallbackQuery, text: str, markup) -> None:
+            user_id = event.from_user.id if event.from_user else 0
+            if isinstance(event, types.CallbackQuery) and event.message:
+                try:
+                    await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+                    await _remember(user_id, event.message)
+                    return
+                except Exception:
+                    pass
+            target = event.message if isinstance(event, types.CallbackQuery) else event
+            if target is None:
+                return
+            sent = await target.answer(text, reply_markup=markup, parse_mode="HTML")
+            await _remember(user_id, sent)
+
+        async def _open_overview(event: types.Message | types.CallbackQuery, *, run_hook: bool = True) -> None:
+            user_id = event.from_user.id if event.from_user else 0
             current_task = asyncio.current_task()
             if not tracker.should_process(user_id, "menu:support", current_task):
                 return
-
             try:
-                await _run_before_chassis_menu(user_id)
-                # Активируем режим ожидания ввода тикета
+                if run_hook:
+                    await _run_before_chassis_menu(user_id)
+                pending.clear(user_id)
+                if isinstance(event, types.Message) and event.bot is not None:
+                    await screens.close_previous_card(event.bot, user_id)
+                await _edit_or_answer(event, _overview_text(), _overview_markup())
+            finally:
+                tracker.release(user_id, current_task)
+
+        async def _open_request(event: types.Message | types.CallbackQuery, *, run_hook: bool = True) -> None:
+            user_id = event.from_user.id if event.from_user else 0
+            current_task = asyncio.current_task()
+            if not tracker.should_process(user_id, "menu:support-request", current_task):
+                return
+            try:
+                if run_hook:
+                    await _run_before_chassis_menu(user_id)
+                chat_id = event.message.chat.id if isinstance(event, types.CallbackQuery) and event.message else event.chat.id
                 pending.set(
                     user_id,
-                    PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE, origin_chat_id=message.chat.id),
+                    PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE, origin_chat_id=chat_id),
                 )
-                await screens.close_previous_card(message.bot, user_id)
-
-                support_prompt = (
-                    f"💬 <b>Служба поддержки ({project_label})</b>\n\n"
-                    f"Напишите ваш вопрос или опишите проблему <b>прямо в ответном сообщении</b>.\n\n"
-                    f"Вы можете отправить текст, скриншот или голосовое сообщение — "
-                    f"команда получит его и ответит прямо сюда.\n\n"
-                    f"<i>Для отмены нажмите кнопку ниже или выберите любой пункт меню.</i>"
-                )
-                prompt_kb = build_support_prompt_keyboard(
-                    cancel_callback=CB_SUPPORT_CANCEL,
-                    extra_rows=extra_support_inline,
-                )
-                sent = await message.answer(support_prompt, reply_markup=prompt_kb, parse_mode="HTML")
-                screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=CardClosePolicy.DELETE)
+                bot = event.bot
+                if bot is not None and isinstance(event, types.Message):
+                    await screens.close_previous_card(bot, user_id)
+                await _edit_or_answer(event, _request_text(), _request_markup())
             finally:
                 tracker.release(user_id, current_task)
 
         @router.message(F.text.in_(support_aliases))
         async def handle_support(message: types.Message):
-            await _open_support(message)
+            await _open_overview(message)
 
         @router.message(Command("support"), F.chat.type == ChatType.PRIVATE)
         async def handle_cmd_support(message: types.Message):
-            await _open_support(message)
+            await _open_request(message)
 
-        # Инлайн-кнопка отмены ввода тикета
+        @router.callback_query(F.data == CB_SUPPORT_REQUEST)
+        async def handle_support_request(query: types.CallbackQuery):
+            await query.answer()
+            await _open_request(query, run_hook=False)
+
+        @router.callback_query(F.data == CB_SUPPORT_HUB)
+        async def handle_support_hub(query: types.CallbackQuery):
+            await query.answer()
+            await _open_overview(query, run_hook=False)
+
+        @router.callback_query(F.data == CB_SUPPORT_DONATE)
+        async def handle_support_donate(query: types.CallbackQuery):
+            if not donate_rows:
+                await query.answer()
+                return
+            user_id = query.from_user.id if query.from_user else 0
+            pending.clear(user_id)
+            hint = f"\n\n{donation_hint}" if donation_hint else ""
+            text = f"💛 <b>Поддержать проект</b>{hint}"
+            markup = build_donation_keyboard(donate_rows)
+            await query.answer()
+            await _edit_or_answer(query, text, markup)
+
+        @router.callback_query(F.data == CB_SUPPORT_BACK)
+        async def handle_support_back(query: types.CallbackQuery):
+            user_id = query.from_user.id if query.from_user else 0
+            pending.clear(user_id)
+            screens.forget_card(user_id)
+            await query.answer()
+            if query.message:
+                try:
+                    await query.message.delete()
+                except Exception:
+                    await query.message.edit_reply_markup(reply_markup=None)
+            if on_support_back is not None and query.message is not None:
+                await on_support_back(query.message, user_id)
+
         @router.callback_query(F.data == CB_SUPPORT_CANCEL)
         async def handle_support_cancel(query: types.CallbackQuery):
             user_id = query.from_user.id if query.from_user else 0

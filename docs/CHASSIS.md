@@ -163,8 +163,8 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `render_info_callback` | `None` | Рендер кузовной карточки Info |
 | `extra_admin_actions` | `None` | Ряды `adm_ops:*` в общей админке |
 | `thread_store` | JSON `SupportThreadStore` | Явный общий SQLite-store для сети |
-| `extra_support_inline` | donate-SKU каталога | Дополнительные кнопки поддержки |
-| `pending_store` | `PendingInputStore()` | Тот же объект в `CompleteChassis.pending_store` |
+| `extra_support_inline` | пусто | Дополнительные кнопки на форме запроса. Донатные SKU туда больше не подставляются |
+| `pending_store` | `PendingInputStore()` | Тот же объект в `CompleteChassis.pending_store`. Scope `user_navigation` не стирает админский поиск |
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
 | `extra_user_dossier_lines` | старый текст `/user` | Доп. строки внизу досье; `callable(user_id) -> sequence[str]` |
 | `extra_user_dossier_rows` | старые кнопки `/user` | Ряды кнопок перед «Главное меню админки»; клики — `extra_admin_actions` |
@@ -174,6 +174,9 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `initial_locale_resolver` | `None` | Замена политики. `None` — штатный разбор `language_code` |
 | `bot_display_name_provider` | `None` | Подпись бота в досье и событии первого запуска. `None` — `origin_bot_id` |
 | `allowed_updates` | `None` | Список кузова для диагностики. Без `my_chat_member` старт предупреждает, что мгновенный `stopped` не придёт |
+| `donation_catalog` | SKU с `issues_voucher=False` | Внешний каталог донатов. Пустой список скрывает «Поддержать проект». Суммы 50/100/500 задаёт кузов |
+| `donation_hint` | `None` | Необязательная рублёвая подсказка на экране доната, не курс и не шлюз |
+| `review_sink` | `None` | Если нет — кнопка отзыва скрыта. Сама модерация — Gate 5C |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -203,6 +206,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 ### 5.1 Кнопки
 
 Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — канонический `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно; переданные кузовом `menu`, `start`, `help`, `support` игнорируются. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку. Без кузовного рендера рама показывает двуязычный Info; при включённом языке на нём есть toggle.
+Кнопка «Поддержка» открывает обзор (запрос, отзыв если есть sink, донат если есть каталог, назад на `render_start_callback`). Скрытая `/support` сразу включает ожидание нового обращения. Донатные суммы рама не зашивает.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  

@@ -29,6 +29,7 @@ from .payments.router import create_payments_router
 from .ports.access import AccessPort, DefaultAccessAdapter
 from .ports.admin_extra import ExtraAdminActions
 from .ports.cabinet import CabinetSlotsProviderPort, DefaultCabinetSlotsAdapter, build_cabinet_renderer
+from .ports.donations import resolve_donation_items
 from .ports.payments import SkuVoucherConsumerPort, VoucherManagerPort, DefaultVoucherManagerAdapter
 from .ports.referrals import DefaultReferralAdapter, ReferralPort
 from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
@@ -95,6 +96,9 @@ async def create_complete_chassis(
     initial_locale_resolver: Callable[[str | None], str] | None = None,
     bot_display_name_provider=None,
     allowed_updates: Sequence[str] | None = None,
+    donation_catalog=None,
+    donation_hint: str | None = None,
+    review_sink=None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -130,6 +134,9 @@ async def create_complete_chassis(
         enable_referrals=config.enable_referrals,
     )
 
+    resolved_pending = pending_store or PendingInputStore()
+    donation_items = resolve_donation_items(config, donation_catalog)
+
     if config.enable_admin:
         dp.include_router(
             create_admin_router(
@@ -140,6 +147,7 @@ async def create_complete_chassis(
                 extra_user_dossier_lines=extra_user_dossier_lines,
                 extra_user_dossier_rows=extra_user_dossier_rows,
                 bot_display_name_provider=bot_display_name_provider,
+                pending_store=resolved_pending,
             )
         )
     if config.enable_payments:
@@ -159,21 +167,51 @@ async def create_complete_chassis(
     if domain_router is not None:
         dp.include_router(domain_router)
     resolved_thread_store = thread_store
-    resolved_pending = pending_store
     if config.enable_buttons:
         if resolved_thread_store is None:
             resolved_thread_store = SupportThreadStore()
-        if extra_support_inline is None:
-            resolved_support_inline = tuple(
-                ((f"{sku.title} — {sku.stars_price} ⭐", f"buy_sku:{sku.sku_code}"),)
-                for sku in config.skus
-                if sku.sku_code.startswith("donate_")
-            )
-        else:
-            resolved_support_inline = extra_support_inline
-        if resolved_pending is None:
-            resolved_pending = PendingInputStore()
+        resolved_support_inline = extra_support_inline or ()
         screens = UserScreenTracker()
+
+        async def _on_support_back(message: Message, user_id: int) -> None:
+            locale = locale_cache.get(user_id) or config.default_locale
+            if render_start_callback is None:
+                if not config.enable_language_switch:
+                    return
+                markup = decorate_info_markup(
+                    None,
+                    MarkupContext(locale=locale, user_id=user_id),
+                )
+                delivered = await message.answer(
+                    _DEFAULT_START_CARD_TEXT,
+                    reply_markup=markup,
+                    parse_mode="HTML",
+                )
+                screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
+                return
+            rendered = await render_start_callback(
+                StartRenderContext(
+                    message=message,
+                    user_id=user_id,
+                    bot=message.bot,
+                    locale=locale,
+                )
+            )
+            if isinstance(rendered, Message):
+                screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
+                return
+            if not isinstance(rendered, ChassisScreen):
+                return
+            markup = rendered.markup
+            if config.enable_language_switch:
+                markup = decorate_info_markup(markup, MarkupContext(locale=locale, user_id=user_id))
+            delivered = await message.answer(
+                rendered.text,
+                reply_markup=markup,
+                parse_mode=rendered.parse_mode,
+            )
+            screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
+
         dp.include_router(
             _create_start_router(
                 config,
@@ -202,6 +240,10 @@ async def create_complete_chassis(
                 before_chassis_menu_action=before_chassis_menu_action,
                 language_switch_enabled=config.enable_language_switch,
                 support_thread_id=config.support_thread_id,
+                donation_items=donation_items,
+                donation_hint=donation_hint,
+                review_enabled=review_sink is not None,
+                on_support_back=_on_support_back,
             )
         )
 

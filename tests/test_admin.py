@@ -941,7 +941,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
     async def test_broadcast_preview_delivery_and_stop(self) -> None:
         self.assertEqual(
             {item.value for item in PendingInputKind},
-            {"support_message", "custom_input"},
+            {"support_message", "custom_input", "admin_lookup"},
         )
         await self.storage.users.upsert_user("bot_a", 16)
         await self.storage.users.set_shadow_ban("bot_a", 16, True)

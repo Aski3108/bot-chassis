@@ -292,8 +292,11 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             for row in support_card.reply_markup.inline_keyboard
             for button in row
         ]
-        self.assertIn("buy_sku:donate_50", callbacks)
+        self.assertNotIn("buy_sku:donate_50", callbacks)
+        self.assertIn("core_sup:cancel", callbacks)
+        self.assertIn("core_sup:hub", callbacks)
         self.assertIn("Psybot", support_card.text)
+        self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
 
         self.session.requests.clear()
         for update_id, command in enumerate(("/start", "/menu", "/help", "/support"), 10):
