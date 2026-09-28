@@ -13,6 +13,7 @@ from aiogram.types import Message
 
 from .admin.router import create_admin_router
 from .config import BotChassisConfig, resolved_origin
+from .contracts import extract_domain_labels
 from .dispatcher import ActiveTaskTracker
 from .followup import PendingInputStore
 from .keyboards import build_main_menu_keyboard
@@ -33,6 +34,7 @@ from .ports.donations import resolve_donation_items
 from .ports.payments import SkuVoucherConsumerPort, VoucherManagerPort, DefaultVoucherManagerAdapter
 from .ports.referrals import DefaultReferralAdapter, ReferralPort
 from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
+from .reviews import create_reviews_router
 from .router import create_button_chassis_router
 from .storage import Storage, create_storage
 from .storage.sqlite_support_thread_store import SqliteSupportThreadStore
@@ -255,6 +257,19 @@ async def create_complete_chassis(
                 on_support_back=_on_support_back,
             )
         )
+        if review_sink is not None:
+            dp.include_router(
+                create_reviews_router(
+                    config.bot_id,
+                    reviews=storage.reviews,
+                    roles=storage.roles,
+                    pending=resolved_pending,
+                    review_sink=review_sink,
+                    origin_bot_id=resolved_origin(config),
+                    project_label=project_label,
+                    domain_labels=extract_domain_labels(domain_rows),
+                )
+            )
 
     return CompleteChassis(
         dp=dp,

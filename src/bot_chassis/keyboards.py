@@ -25,6 +25,10 @@ from .contracts import (
     CB_SUPPORT_TICKET_CLOSE_PREFIX,
     CB_SUPPORT_TICKET_REOPEN_PREFIX,
     CB_SUPPORT_USER_REPLY_PREFIX,
+    CB_REVIEW_CONSENT_YES,
+    CB_REVIEW_CONSENT_NO,
+    CB_REVIEW_PUBLISH_PREFIX,
+    CB_REVIEW_REJECT_PREFIX,
 )
 
 
@@ -174,6 +178,34 @@ def build_user_ticket_reply_keyboard(ticket_id: str) -> InlineKeyboardMarkup:
                 text="Ответить поддержке",
                 callback_data=f"{CB_SUPPORT_USER_REPLY_PREFIX}{ticket_id}",
             )
+        ]]
+    )
+
+
+def build_review_consent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да, можно опубликовать", callback_data=CB_REVIEW_CONSENT_YES),
+            ],
+            [
+                InlineKeyboardButton(text="Нет, не публиковать", callback_data=CB_REVIEW_CONSENT_NO),
+            ],
+        ]
+    )
+
+
+def build_review_moderation_keyboard(review_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Опубликовать",
+                callback_data=f"{CB_REVIEW_PUBLISH_PREFIX}{review_id}",
+            ),
+            InlineKeyboardButton(
+                text="Отклонить",
+                callback_data=f"{CB_REVIEW_REJECT_PREFIX}{review_id}",
+            ),
         ]]
     )
 

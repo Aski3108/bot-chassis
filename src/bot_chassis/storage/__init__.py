@@ -9,6 +9,7 @@ from ..config import BotChassisConfig
 from .engine import StorageEngine, utc_now
 from .repositories.bot_settings import BotSettingsRepository
 from .repositories.referrals import ReferralsRepository
+from .repositories.reviews import ReviewRecord, ReviewSubmissionsRepository
 from .repositories.roles import RolesRepository
 from .repositories.subscriptions import SubscriptionsRepository
 from .repositories.support_threads import SupportThreadsRepository
@@ -25,6 +26,7 @@ class Storage:
     transactions: TransactionsRepository
     subscriptions: SubscriptionsRepository
     support_threads: SupportThreadsRepository
+    reviews: ReviewSubmissionsRepository
     bot_settings: BotSettingsRepository
     referrals: ReferralsRepository
     bot_statuses: UserBotStatusRepository
@@ -43,6 +45,7 @@ async def create_storage(config: BotChassisConfig) -> Storage:
         transactions=TransactionsRepository(engine),
         subscriptions=SubscriptionsRepository(engine, users),
         support_threads=SupportThreadsRepository(engine),
+        reviews=ReviewSubmissionsRepository(engine),
         bot_settings=BotSettingsRepository(engine),
         referrals=ReferralsRepository(engine, users),
         bot_statuses=bot_statuses,
@@ -52,6 +55,7 @@ async def create_storage(config: BotChassisConfig) -> Storage:
 
 
 __all__ = [
+    "ReviewRecord",
     "Storage",
     "StorageEngine",
     "UserRecord",

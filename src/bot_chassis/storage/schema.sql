@@ -117,6 +117,30 @@ CREATE TABLE IF NOT EXISTS support_ticket_messages (
 CREATE INDEX IF NOT EXISTS idx_support_ticket_messages
     ON support_ticket_messages(bot_id, ticket_id);
 
+-- 5c. Очередь отзывов (без текста и медиа)
+CREATE TABLE IF NOT EXISTS review_submissions (
+    bot_id TEXT NOT NULL,
+    review_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    origin_bot_id TEXT NOT NULL DEFAULT '',
+    source_chat_id INTEGER NOT NULL,
+    source_message_id INTEGER NOT NULL,
+    moderation_chat_id INTEGER,
+    moderation_message_id INTEGER,
+    published_chat_id INTEGER,
+    published_message_id INTEGER,
+    consent_to_publish INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT,
+    published_at TEXT,
+    PRIMARY KEY (bot_id, review_id),
+    CHECK (status IN ('pending', 'published', 'rejected')),
+    CHECK (consent_to_publish IN (0, 1)),
+    FOREIGN KEY (bot_id, user_id) REFERENCES users(bot_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_status ON review_submissions(bot_id, status);
+
 -- 6. Системные настройки и флаги шасси (Рубильник)
 CREATE TABLE IF NOT EXISTS bot_settings (
     bot_id TEXT NOT NULL PRIMARY KEY,

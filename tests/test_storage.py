@@ -564,9 +564,12 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
             thread_cols = {
                 row[1] for row in conn.execute("PRAGMA table_info(support_threads)")
             }
-            return tx_cols, thread_cols, _unique_index_columns(conn, "transactions")
+            review_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'review_submissions'"
+            ).fetchone()
+            return tx_cols, thread_cols, review_table, _unique_index_columns(conn, "transactions")
 
-        tx_cols, thread_cols, unique_indexes = await first.run(_inspect)
+        tx_cols, thread_cols, review_table, unique_indexes = await first.run(_inspect)
         self.assertIn("merchant_origin_bot_id", tx_cols)
         self.assertIn("merchant_telegram_bot_id", tx_cols)
         self.assertTrue(
@@ -574,6 +577,7 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
              "message_thread_id", "operator_id", "first_answered_at", "closed_at"}
             <= thread_cols
         )
+        self.assertIsNotNone(review_table)
         self.assertIn(
             ("bot_id", "provider", "merchant_telegram_bot_id", "payment_id"),
             unique_indexes,

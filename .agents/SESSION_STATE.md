@@ -3,7 +3,7 @@
 **Дата:** 2026-09-28
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** коммит Gate 5B `feat(support): keep sqlite ticket conversations open`
+**HEAD:** коммит Gate 5C `feat(reviews): add moderated review publishing`
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.2.2` (tag `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112`)
 **Profiling hold:** tag `profiling` = `6823f30`
@@ -120,7 +120,9 @@ PASS. Узкий контур: 85 passed; полный сьют: 148 passed; `gi
 Gate 5A выполнен: обзор поддержки, запрос, внешний каталог донатов, раздельные
 pending scopes. Полный сьют: 155 passed. Gate 5B выполнен: SQLite-тикет идёт
 `open → in_progress → closed`, пользователь отвечает в тот же диалог, JSON
-остаётся одноразовым. Полный сьют: 163 passed. Gate 5C не начат. Push не делался.
+остаётся одноразовым. Полный сьют: 163 passed. Gate 5C выполнен: отзыв с согласием,
+очередь модерации, одноразовые publish/reject, ссылка пользователю. Полный сьют:
+167 passed. Независимая граница B3. Gate 6 не начат. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен

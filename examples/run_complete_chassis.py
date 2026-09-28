@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from bot_chassis.commands import register_button_chassis_startup
 from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.factory import CompleteChassis, create_complete_chassis
+from bot_chassis.ports.reviews import TelegramReviewSink
 from bot_chassis.user_lifecycle import CANON_ALLOWED_UPDATES
 
 logging.basicConfig(
@@ -113,12 +114,24 @@ async def main() -> None:
 
     body = _Body()
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    config = build_config(os.environ)
+    reviews_channel_id = _int_or_none(os.getenv("REVIEWS_CHANNEL_ID"))
+    reviews_channel_url = (os.getenv("REVIEWS_CHANNEL_URL") or "").strip()
+    moderation_chat = config.audit_chat_id or config.support_chat_id
+    review_sink = None
+    if reviews_channel_id and reviews_channel_url and moderation_chat is not None:
+        review_sink = TelegramReviewSink(
+            moderation_chat_id=moderation_chat,
+            channel_id=reviews_channel_id,
+            channel_url=reviews_channel_url,
+        )
     try:
         chassis = await create_complete_chassis(
             bot,
-            build_config(os.environ),
+            config,
             domain_router=create_demo_domain(body),
             domain_rows=DOMAIN_ROWS,
+            review_sink=review_sink,
         )
         body.chassis = chassis
         register_button_chassis_startup(chassis.dp, bot)

@@ -35,6 +35,7 @@ from .contracts import (
     CB_SUPPORT_CANCEL,
     CB_SUPPORT_REQUEST,
     CB_SUPPORT_DONATE,
+    CB_SUPPORT_REVIEW,
     CB_SUPPORT_BACK,
     CB_SUPPORT_HUB,
     CB_NAV_CLOSE,
@@ -323,6 +324,13 @@ def create_button_chassis_router(
                 "<i>Отмена или пункт меню сбрасывают ожидание. Назад возвращает к обзору.</i>"
             )
 
+        def _review_text() -> str:
+            return (
+                f"⭐ <b>Отзыв ({project_label})</b>\n\n"
+                "Отправьте текст, одно медиа или медиа с подписью.\n\n"
+                "<i>Перед отправкой спросим согласие на публичную публикацию.</i>"
+            )
+
         async def _remember(user_id: int, sent: types.Message) -> None:
             screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=CardClosePolicy.DELETE)
 
@@ -376,6 +384,26 @@ def create_button_chassis_router(
             finally:
                 tracker.release(user_id, current_task)
 
+        async def _open_review(event: types.Message | types.CallbackQuery, *, run_hook: bool = True) -> None:
+            user_id = event.from_user.id if event.from_user else 0
+            current_task = asyncio.current_task()
+            if not tracker.should_process(user_id, "menu:support-review", current_task):
+                return
+            try:
+                if run_hook:
+                    await _run_before_chassis_menu(user_id)
+                chat_id = event.message.chat.id if isinstance(event, types.CallbackQuery) and event.message else event.chat.id
+                pending.set(
+                    user_id,
+                    PendingInput(kind=PendingInputKind.REVIEW, origin_chat_id=chat_id),
+                )
+                bot = event.bot
+                if bot is not None and isinstance(event, types.Message):
+                    await screens.close_previous_card(bot, user_id)
+                await _edit_or_answer(event, _review_text(), _request_markup())
+            finally:
+                tracker.release(user_id, current_task)
+
         @router.message(F.text.in_(support_aliases))
         async def handle_support(message: types.Message):
             await _open_overview(message)
@@ -388,6 +416,12 @@ def create_button_chassis_router(
         async def handle_support_request(query: types.CallbackQuery):
             await query.answer()
             await _open_request(query, run_hook=False)
+
+        if review_enabled:
+            @router.callback_query(F.data == CB_SUPPORT_REVIEW)
+            async def handle_support_review(query: types.CallbackQuery):
+                await query.answer()
+                await _open_review(query, run_hook=False)
 
         @router.callback_query(F.data == CB_SUPPORT_HUB)
         async def handle_support_hub(query: types.CallbackQuery):

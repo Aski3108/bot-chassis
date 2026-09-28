@@ -176,7 +176,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `allowed_updates` | `None` | Список кузова для диагностики. Без `my_chat_member` старт предупреждает, что мгновенный `stopped` не придёт |
 | `donation_catalog` | SKU с `issues_voucher=False` | Внешний каталог донатов. Пустой список скрывает «Поддержать проект». Суммы 50/100/500 задаёт кузов |
 | `donation_hint` | `None` | Необязательная рублёвая подсказка на экране доната, не курс и не шлюз |
-| `review_sink` | `None` | Если нет — кнопка отзыва скрыта. Сама модерация — Gate 5C |
+| `review_sink` | `None` | Если нет — кнопка отзыва скрыта. Сток копирует материал в очередь модерации и публикует в канал; SQLite хранит только ID и согласие |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -208,6 +208,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — канонический `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно; переданные кузовом `menu`, `start`, `help`, `support` игнорируются. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку. Без кузовного рендера рама показывает двуязычный Info; при включённом языке на нём есть toggle.
 Кнопка «Поддержка» открывает обзор (запрос, отзыв если есть sink, донат если есть каталог, назад на `render_start_callback`). Скрытая `/support` сразу включает ожидание нового обращения. Донатные суммы рама не зашивает.
 SQLite-тикет не закрывается первым ответом: оператор отвечает несколько раз, пользователь жмёт «Ответить поддержке», слот освобождает только «Закрыть обращение». JSON-store по-прежнему одноразовый.
+Отзыв (если есть `review_sink`) принимает текст или одно медиа, спрашивает согласие на публикацию и уходит в очередь модерации без копирования содержимого в SQLite. Суперадмин публикует или отклоняет один раз; после публикации пользователь получает прямую ссылку.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  
@@ -226,11 +227,12 @@ SQLite-тикет не закрывается первым ответом: оп�
 
 ### 5.2 Storage
 
-`create_storage(config)` → `Storage` с репозиториями: users, roles, transactions, subscriptions, support_threads, bot_settings, referrals.  
+`create_storage(config)` → `Storage` с репозиториями: users, roles, transactions, subscriptions, support_threads, reviews, bot_settings, referrals.
+
 WAL, одна связь на транзакцию, `bot_id` везде. `amount` только INTEGER.  
 Посев суперадминов: `INSERT OR IGNORE`.
 
-Таблицы: `users`, `roles`, `transactions`, `subscriptions`, `support_threads`, `support_ticket_messages`, `bot_settings`, `referrals`.
+Таблицы: `users`, `roles`, `transactions`, `subscriptions`, `support_threads`, `support_ticket_messages`, `review_submissions`, `bot_settings`, `referrals`.
 Схема: `src/bot_chassis/storage/schema.sql`. Колонки `provider` / `payment_id` готовы к другим шлюзам; **в v1 пишется только** `telegram_stars`.
 
 `consent_at` шасси хранит, сбор согласия — кузов.

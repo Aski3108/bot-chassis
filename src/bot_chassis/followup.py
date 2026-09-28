@@ -24,6 +24,8 @@ class PendingInputKind(str, Enum):
     """Типы ожидаемого пользовательского ввода."""
     SUPPORT_MESSAGE = "support_message"
     SUPPORT_REPLY = "support_reply"
+    REVIEW = "review"
+    REVIEW_CONSENT = "review_consent"
     CUSTOM_INPUT = "custom_input"
     ADMIN_LOOKUP = "admin_lookup"
 
