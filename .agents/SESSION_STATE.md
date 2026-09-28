@@ -3,7 +3,7 @@
 **Дата:** 2026-09-28
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** коммит Gate 3 `feat(users): track per-bot lifecycle` (поверх коррекции Gate 2 `5df45ad`)
+**HEAD:** коммит Gate 4 `feat(admin): resolve users by id or username` (поверх B2 `0d96bd9`)
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.2.2` (tag `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112`)
 **Profiling hold:** tag `profiling` = `6823f30`
@@ -114,7 +114,8 @@ active membership и отсутствие событий смены статус
 исправлены: membership не throttled, first-launch имеет отдельный атомарный
 claim, реальные переходы lifecycle дают одно events-событие. Повторный B2:
 PASS. Узкий контур: 85 passed; полный сьют: 148 passed; `git diff --check`
-чистый. Gate 4 не начат. Push не делался.
+чистый. Gate 4 выполнен: ID и `@username`, отдельные совпадения не схлопываются.
+Полный сьют после Gate 4: 151 passed. Gate 5A не начат. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен

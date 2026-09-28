@@ -240,7 +240,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 
 ### 5.4 Админка
 
-Фильтры `admin` / `superadmin`. Команды: `/admin`, `/user`, `/ban`, `/unban`, `/shadowban`, `/grant`, `/revoke`, `/gift`, `/gift_revoke`, `/export`, `/backup`, `/refund`, `/maintenance`.  
+Фильтры `admin` / `superadmin`. Команды: `/admin`, `/user`, `/ban`, `/unban`, `/shadowban`, `/grant`, `/revoke`, `/gift`, `/gift_revoke`, `/export`, `/backup`, `/refund`, `/maintenance`. Цель `/user`, `/ban`, `/unban`, `/shadowban`, `/grant`, `/revoke`, `/gift` и `/gift_revoke` — числовой ID или `@username` без учёта регистра. Несколько старых совпадений показывают список ID и ничего не меняют. Кнопка «Найти пользователя» ждёт ввод отдельно от поддержки, рассылки и кузова. `/cancel` отменяет поиск.
 Досье `adm_usr:*`, возврат `adm_home`. `extra_user_dossier_lines` / `extra_user_dossier_rows` дополняют `/user`; `None` — старая карточка; клики новых кнопок идут в `extra_admin_actions.handle_callback`.  
 Рассылка 25 msg/s, свой RAM-store (не FSM кнопок), общий `asyncio.Lock`.  
 Экспорт CSV/ZIP только суперадмину в ЛС. Бэкап ≤ 50 МБ через `FSInputFile`.  

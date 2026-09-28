@@ -29,6 +29,7 @@ from bot_chassis.admin.broadcast import (
     CB_BROADCAST_STOP,
     reset_broadcast_sessions,
 )
+from bot_chassis.admin.lookup import reset_admin_lookups
 from bot_chassis.admin.filters import AdminRoleFilter, SuperadminRoleFilter, _user_id
 from bot_chassis.admin.router import (
     ALREADY_GRANTED,
@@ -207,6 +208,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         reset_broadcast_sessions()
+        reset_admin_lookups()
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
         await self.storage.users.upsert_user("bot_a", 15)
         await self.storage.users.set_ban("bot_a", 15, True, "spam")
@@ -263,7 +265,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Подарки: 1", text)
         self.assertIn("🟢 снят", text)
         callbacks = [button.callback_data for row in sent[0].reply_markup.inline_keyboard for button in row]
-        self.assertEqual(callbacks, [CB_MAINT, CB_EXPORT, CB_BROADCAST])
+        self.assertEqual(callbacks, [CB_MAINT, CB_EXPORT, CB_BROADCAST, "adm_find"])
 
         self.session.requests.clear()
         panel = Message(
@@ -311,7 +313,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             for button in row
         ]
         self.assertEqual(callbacks[:3], [CB_MAINT, CB_EXPORT, CB_BROADCAST])
-        self.assertEqual(callbacks[3:], ["adm_ops:restart:adhd"])
+        self.assertEqual(callbacks[3:], ["adm_find", "adm_ops:restart:adhd"])
 
         panel = Message(
             message_id=50,

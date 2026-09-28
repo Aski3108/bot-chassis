@@ -37,6 +37,11 @@ class BroadcastSession:
     cancel: bool = False
 
 
+def is_awaiting_broadcast_text(actor_id: int) -> bool:
+    session = _BROADCAST_SESSIONS.get(actor_id)
+    return session is not None and session.phase == "awaiting"
+
+
 def reset_broadcast_sessions() -> None:
     global _BROADCAST_LOCK
     _BROADCAST_SESSIONS.clear()
@@ -54,6 +59,9 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if current is not None and current.phase == "running":
             await call.answer("Рассылка уже идёт", show_alert=True)
             return
+        from .lookup import cancel_admin_lookup
+
+        cancel_admin_lookup(actor.id)
         _BROADCAST_SESSIONS[actor.id] = BroadcastSession(phase="awaiting")
         await call.bot.send_message(actor.id, BROADCAST_PROMPT)
         await call.answer()

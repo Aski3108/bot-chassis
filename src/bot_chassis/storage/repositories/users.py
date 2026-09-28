@@ -7,6 +7,8 @@ from typing import Optional
 
 from ..engine import StorageEngine, utc_now
 
+_KEEP = object()
+
 
 @dataclass(slots=True, frozen=True)
 class UserRecord:
@@ -53,19 +55,30 @@ class UsersRepository:
         self,
         bot_id: str,
         user_id: int,
-        username: Optional[str] = None,
+        username: Optional[str] | object = _KEEP,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         language_code: Optional[str] = None,
     ) -> UserRecord:
         def _op(conn) -> UserRecord:
+            keep_username = username is _KEEP
+            stored_username = None if keep_username else normalize_username(
+                username if isinstance(username, str) else None
+            )
+            if not keep_username and stored_username is not None:
+                _release_username(conn, bot_id, user_id, stored_username)
+            username_update = (
+                "username = COALESCE(excluded.username, users.username)"
+                if keep_username
+                else "username = excluded.username"
+            )
             conn.execute(
-                """
+                f"""
                 INSERT INTO users (
                     bot_id, user_id, username, first_name, last_name, language_code, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(bot_id, user_id) DO UPDATE SET
-                    username = COALESCE(excluded.username, users.username),
+                    {username_update},
                     first_name = COALESCE(excluded.first_name, users.first_name),
                     last_name = COALESCE(excluded.last_name, users.last_name),
                     language_code = users.language_code,
@@ -74,7 +87,7 @@ class UsersRepository:
                 (
                     bot_id,
                     user_id,
-                    username,
+                    stored_username,
                     first_name,
                     last_name,
                     language_code or "ru",
@@ -132,6 +145,9 @@ class UsersRepository:
         """Первый визит записывает вычисленную локаль. Повтор только обновляет сырой код."""
 
         def _op(conn) -> UserRecord:
+            stored_username = normalize_username(username)
+            if stored_username is not None:
+                _release_username(conn, bot_id, user_id, stored_username)
             conn.execute(
                 """
                 INSERT INTO users (
@@ -139,7 +155,7 @@ class UsersRepository:
                     language_code, telegram_language_code, locale_source, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?)
                 ON CONFLICT(bot_id, user_id) DO UPDATE SET
-                    username = COALESCE(excluded.username, users.username),
+                    username = excluded.username,
                     first_name = COALESCE(excluded.first_name, users.first_name),
                     last_name = COALESCE(excluded.last_name, users.last_name),
                     telegram_language_code = excluded.telegram_language_code,
@@ -150,7 +166,7 @@ class UsersRepository:
                 (
                     bot_id,
                     user_id,
-                    username,
+                    stored_username,
                     first_name,
                     last_name,
                     resolved_locale,
@@ -247,6 +263,25 @@ class UsersRepository:
 
         return await self._engine.run(_op)
 
+    async def find_by_username(self, bot_id: str, username: str) -> list[UserRecord]:
+        """Регистронезависимый поиск ника без @. Несколько старых строк не схлопываются."""
+        normalized = normalize_username(username)
+        if not normalized:
+            return []
+
+        def _op(conn) -> list[UserRecord]:
+            rows = conn.execute(
+                """
+                SELECT * FROM users
+                WHERE bot_id = ? AND username = ? COLLATE NOCASE
+                ORDER BY user_id ASC
+                """,
+                (bot_id, normalized),
+            ).fetchall()
+            return [_row_to_user(row) for row in rows]
+
+        return await self._engine.run(_op)
+
     async def get_user(self, bot_id: str, user_id: int) -> Optional[UserRecord]:
         def _op(conn) -> Optional[UserRecord]:
             row = conn.execute(
@@ -307,6 +342,27 @@ class UsersRepository:
             return True, None
 
         return await self._engine.run(_op)
+
+
+def normalize_username(value: str | None) -> str | None:
+    """Храним и ищем ник без @. Пустая строка — отсутствия ника."""
+    if value is None:
+        return None
+    text = value.strip()
+    if text.startswith("@"):
+        text = text[1:].strip()
+    return text or None
+
+
+def _release_username(conn, bot_id: str, user_id: int, username: str) -> None:
+    conn.execute(
+        """
+        UPDATE users
+        SET username = NULL, updated_at = ?
+        WHERE bot_id = ? AND user_id != ? AND username = ? COLLATE NOCASE
+        """,
+        (utc_now(), bot_id, user_id, username),
+    )
 
 
 def _has_staff_role(conn, bot_id: str, user_id: int) -> bool:

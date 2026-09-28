@@ -28,7 +28,15 @@ from ..user_lifecycle import STATUS_LABELS
 from ..ports.admin_extra import ExtraAdminActions
 from ..storage import Storage
 from .audit import send_admin_audit
-from .broadcast import register_broadcast
+from .broadcast import is_awaiting_broadcast_text, register_broadcast
+from .lookup import (
+    FIND_CANCELLED,
+    FIND_PROMPT,
+    AwaitingAdminLookup,
+    begin_admin_lookup,
+    cancel_admin_lookup,
+)
+from .user_resolve import format_ambiguous_users, resolve_user_token
 from .export import EXPORT_SCOPES, build_export
 from .filters import AdminRoleFilter, SuperadminRoleFilter
 
@@ -36,23 +44,24 @@ CB_MAINT = "adm_maint"
 CB_EXPORT = "adm_export"
 CB_BROADCAST = "adm_bcast"
 CB_HOME = "adm_home"
+CB_FIND = "adm_find"
 SUPERADMIN_ONLY = "Только для суперадмина"
-BAN_USAGE = "Формат: /ban user_id [причина]"
-UNBAN_USAGE = "Формат: /unban user_id"
-SHADOW_USAGE = "Формат: /shadowban user_id 0|1"
+BAN_USAGE = "Формат: /ban ID|@username [причина]"
+UNBAN_USAGE = "Формат: /unban ID|@username"
+SHADOW_USAGE = "Формат: /shadowban ID|@username 0|1"
 USER_NOT_FOUND = "Пользователь не найден"
 LAST_SUPERADMIN = "Нельзя забанить последнего суперадмина"
 TARGET_IS_ADMIN = "Нельзя наложить тень на admin или superadmin"
-GRANT_USAGE = "Формат: /grant user_id role"
-REVOKE_USAGE = "Формат: /revoke user_id role"
+GRANT_USAGE = "Формат: /grant ID|@username role"
+REVOKE_USAGE = "Формат: /revoke ID|@username role"
 INVALID_ROLE = "Неизвестная роль. Допустимо: admin, superadmin"
 ALREADY_GRANTED = "Роль уже выдана"
 ROLE_NOT_FOUND = "Роль не найдена"
 LAST_SUPERADMIN_ROLE = "Нельзя снять роль последнего суперадмина"
-GIFT_USAGE = "Формат: /gift user_id [days]"
-GIFT_REVOKE_USAGE = "Формат: /gift_revoke user_id"
+GIFT_USAGE = "Формат: /gift ID|@username [days]"
+GIFT_REVOKE_USAGE = "Формат: /gift_revoke ID|@username"
 GIFT_NOT_FOUND = "Активный подарок не найден"
-USER_USAGE = "Формат: /user user_id"
+USER_USAGE = "Формат: /user ID|@username"
 EXPORT_USAGE = "Формат: /export [users|payments|gifts|all]"
 BACKUP_USAGE = "Формат: /backup"
 BACKUP_TOO_LARGE = "Снапшот больше 50 МБ, файл не отправлен."
@@ -98,9 +107,11 @@ def create_admin_router(
         if actor is None:
             return
         args = _command_args(message)
-        target_id = _parse_user_id(args[0]) if args else None
-        if target_id is None:
+        if not args:
             await _reply(message, BAN_USAGE)
+            return
+        target_id = await _target_from_token(message, storage, bot_id, args[0], BAN_USAGE)
+        if target_id is None:
             return
         reason = " ".join(args[1:]).strip() or None
         if reason and len(reason) > 500:
@@ -122,9 +133,11 @@ def create_admin_router(
         if actor is None:
             return
         args = _command_args(message)
-        target_id = _parse_user_id(args[0]) if args else None
-        if target_id is None:
+        if len(args) != 1:
             await _reply(message, UNBAN_USAGE)
+            return
+        target_id = await _target_from_token(message, storage, bot_id, args[0], UNBAN_USAGE)
+        if target_id is None:
             return
         ok, err = await storage.users.set_ban(bot_id, target_id, False)
         if not ok:
@@ -139,10 +152,12 @@ def create_admin_router(
         if actor is None:
             return
         args = _command_args(message)
-        target_id = _parse_user_id(args[0]) if args else None
         flag = args[1] if len(args) > 1 else ""
-        if target_id is None or flag not in {"0", "1"}:
+        if len(args) != 2 or flag not in {"0", "1"}:
             await _reply(message, SHADOW_USAGE)
+            return
+        target_id = await _target_from_token(message, storage, bot_id, args[0], SHADOW_USAGE)
+        if target_id is None:
             return
         enabled = flag == "1"
         ok, err = await storage.users.set_shadow_ban(bot_id, target_id, enabled)
@@ -162,11 +177,14 @@ def create_admin_router(
         actor = await _actor(message, storage, bot_id)
         if actor is None:
             return
-        parsed = _parse_role_args(message)
-        if parsed is None:
+        args = _command_args(message)
+        if len(args) != 2:
             await _reply(message, GRANT_USAGE)
             return
-        target_id, role = parsed
+        target_id = await _target_from_token(message, storage, bot_id, args[0], GRANT_USAGE)
+        if target_id is None:
+            return
+        role = args[1]
         ok, err = await storage.roles.grant_role(bot_id, target_id, role, granted_by=actor.id)
         if not ok:
             await _reply(message, _grant_error(err))
@@ -183,11 +201,14 @@ def create_admin_router(
         actor = await _actor(message, storage, bot_id)
         if actor is None:
             return
-        parsed = _parse_role_args(message)
-        if parsed is None:
+        args = _command_args(message)
+        if len(args) != 2:
             await _reply(message, REVOKE_USAGE)
             return
-        target_id, role = parsed
+        target_id = await _target_from_token(message, storage, bot_id, args[0], REVOKE_USAGE)
+        if target_id is None:
+            return
+        role = args[1]
         ok, err = await storage.roles.revoke_role(bot_id, target_id, role)
         if not ok:
             await _reply(message, _revoke_error(err))
@@ -204,11 +225,14 @@ def create_admin_router(
         actor = await _actor(message, storage, bot_id)
         if actor is None:
             return
-        parsed = _parse_gift_args(message)
+        parsed = _parse_gift_shape(message)
         if parsed is None:
             await _reply(message, GIFT_USAGE)
             return
-        target_id, days = parsed
+        token, days = parsed
+        target_id = await _target_from_token(message, storage, bot_id, token, GIFT_USAGE)
+        if target_id is None:
+            return
         ok, err = await storage.subscriptions.grant_gift_access(
             bot_id, target_id, granted_by=actor.id, days=days
         )
@@ -229,9 +253,11 @@ def create_admin_router(
         if actor is None:
             return
         args = _command_args(message)
-        target_id = _parse_user_id(args[0]) if len(args) == 1 else None
-        if target_id is None:
+        if len(args) != 1:
             await _reply(message, GIFT_REVOKE_USAGE)
+            return
+        target_id = await _target_from_token(message, storage, bot_id, args[0], GIFT_REVOKE_USAGE)
+        if target_id is None:
             return
         ok, _err = await storage.subscriptions.revoke_gift_access(bot_id, target_id)
         if not ok:
@@ -250,9 +276,11 @@ def create_admin_router(
         if actor is None:
             return
         args = _command_args(message)
-        target_id = _parse_user_id(args[0]) if len(args) == 1 else None
-        if target_id is None:
+        if len(args) != 1:
             await _reply(message, USER_USAGE)
+            return
+        target_id = await _target_from_token(message, storage, bot_id, args[0], USER_USAGE)
+        if target_id is None:
             return
         card = await _dossier(
             storage,
@@ -497,6 +525,51 @@ def create_admin_router(
             if not handled:
                 await call.answer()
 
+    @router.callback_query(F.data == CB_FIND, staff)
+    async def start_user_lookup(call: CallbackQuery) -> None:
+        actor = call.from_user
+        if actor is None or await _is_banned(storage, bot_id, actor.id):
+            await call.answer()
+            return
+        if is_awaiting_broadcast_text(actor.id):
+            await call.answer("Сначала завершите рассылку", show_alert=True)
+            return
+        begin_admin_lookup(actor.id)
+        await call.bot.send_message(actor.id, FIND_PROMPT)
+        await call.answer()
+
+    @router.message(AwaitingAdminLookup(), F.chat.type == ChatType.PRIVATE, staff)
+    async def capture_user_lookup(message: Message) -> None:
+        actor = await _actor(message, storage, bot_id)
+        if actor is None:
+            return
+        text = (message.text or "").strip()
+        command = text.split(maxsplit=1)[0].split("@", 1)[0] if text.startswith("/") else ""
+        if command == "/cancel":
+            cancel_admin_lookup(actor.id)
+            await _reply(message, FIND_CANCELLED)
+            return
+        if not text:
+            await _reply(message, FIND_PROMPT)
+            return
+        cancel_admin_lookup(actor.id)
+        target_id = await _target_from_token(message, storage, bot_id, text, USER_NOT_FOUND)
+        if target_id is None:
+            return
+        card = await _dossier(
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
+        )
+        if card is None:
+            await _reply(message, USER_NOT_FOUND)
+            return
+        dossier_text, markup = card
+        await message.answer(dossier_text, reply_markup=markup, parse_mode="HTML")
+
     register_broadcast(router, bot_id, storage, config, staff)
     return router
 
@@ -510,6 +583,7 @@ def _home_keyboard(
         [InlineKeyboardButton(text=maint_label, callback_data=CB_MAINT)],
         [InlineKeyboardButton(text="📥 Выгрузка базы (Excel)", callback_data=CB_EXPORT)],
         [InlineKeyboardButton(text="📢 Новая рассылка", callback_data=CB_BROADCAST)],
+        [InlineKeyboardButton(text="Найти пользователя", callback_data=CB_FIND)],
     ]
     for row in extra_rows or ():
         buttons = [
@@ -579,16 +653,6 @@ def _shadow_error(code: str | None) -> str:
     if code == "target_is_admin":
         return TARGET_IS_ADMIN
     return USER_NOT_FOUND
-
-
-def _parse_role_args(message: Message) -> tuple[int, str] | None:
-    args = _command_args(message)
-    if len(args) != 2:
-        return None
-    target_id = _parse_user_id(args[0])
-    if target_id is None:
-        return None
-    return target_id, args[1]
 
 
 def _grant_error(code: str | None) -> str:
@@ -852,18 +916,35 @@ async def _paid_count(storage: Storage, bot_id: str, user_id: int) -> int:
     return await storage.engine.run(_op)
 
 
-def _parse_gift_args(message: Message) -> tuple[int, int | None] | None:
+def _parse_gift_shape(message: Message) -> tuple[str, int | None] | None:
     args = _command_args(message)
     if not args or len(args) > 2:
         return None
-    target_id = _parse_user_id(args[0])
-    if target_id is None:
-        return None
     if len(args) == 1:
-        return target_id, None
+        return args[0], None
     if not args[1].isdigit():
         return None
-    return target_id, int(args[1])
+    return args[0], int(args[1])
+
+
+async def _target_from_token(
+    message: Message,
+    storage: Storage,
+    bot_id: str,
+    token: str,
+    usage: str,
+) -> int | None:
+    resolved = await resolve_user_token(storage, bot_id, token)
+    if resolved.kind == "invalid":
+        await _reply(message, usage)
+        return None
+    if resolved.kind == "missing":
+        await _reply(message, USER_NOT_FOUND)
+        return None
+    if resolved.kind == "ambiguous":
+        await message.answer(format_ambiguous_users(resolved.matches), parse_mode="HTML")
+        return None
+    return resolved.user_id
 
 
 async def _actor(message: Message, storage: Storage, bot_id: str):
