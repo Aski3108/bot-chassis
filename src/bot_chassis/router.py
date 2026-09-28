@@ -96,6 +96,7 @@ def create_button_chassis_router(
     *,
     before_chassis_menu_action: Optional[Callable[[int], Awaitable[None]]] = None,
     language_switch_enabled: bool = False,
+    support_thread_id: int | None = None,
 ) -> Router:
     """
     Фабрика универсального роутера шасси кнопок.
@@ -358,6 +359,7 @@ def create_button_chassis_router(
                 user_message=message,
                 thread_store=threads,
                 project_label=project_label,
+                message_thread_id=support_thread_id,
             )
             if copied_id:
                 # Чек тикета НЕ должен быть новым носителем клавиатуры
@@ -381,10 +383,11 @@ def create_button_chassis_router(
                 bot=message.bot,
                 admin_reply_message=message,
                 thread_store=threads,
+                expected_thread_id=support_thread_id,
             )
             if not success:
                 # Если ответ не привязан к тикету (админы переписываются между собой) — тишина
-                if status in {"UNKNOWN_THREAD", "FOREIGN_ORIGIN", "ALREADY_ANSWERED"}:
+                if status in {"UNKNOWN_THREAD", "FOREIGN_ORIGIN", "ALREADY_ANSWERED", "WRONG_THREAD"}:
                     return
                 # Уведомляем админа ТОЛЬКО при реальной ошибке доставки известному пользователю
                 await message.reply(f"⚠️ {status}")

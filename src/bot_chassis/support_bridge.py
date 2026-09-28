@@ -21,6 +21,7 @@ from aiogram import Bot, types
 from aiogram.exceptions import TelegramForbiddenError
 from loguru import logger
 
+from .service_notify import thread_kwargs
 from .storage.sqlite_support_thread_store import TicketLimitExceeded
 
 DEFAULT_SUPPORT_PERSISTENCE_PATH = os.path.join("temp", "support_threads.json")
@@ -118,6 +119,7 @@ async def send_user_report_to_support(
     user_message: types.Message,
     thread_store: SupportThreadStore,
     project_label: str = "Сервис",
+    message_thread_id: int | None = None,
 ) -> Optional[int]:
     """Доставляет обращение пользователя в чат техподдержки."""
     user = user_message.from_user
@@ -140,16 +142,19 @@ async def send_user_report_to_support(
 
     try:
         # 1. Карточка-шапка
+        topic = thread_kwargs(message_thread_id)
         header_msg = await bot.send_message(
             chat_id=support_chat_id,
             text=header_text,
             parse_mode="HTML",
+            **topic,
         )
         # 2. Копия сообщения пользователя (текст, голос, фото, документ)
         copied_msg = await bot.copy_message(
             chat_id=support_chat_id,
             from_chat_id=user_message.chat.id,
             message_id=user_message.message_id,
+            **topic,
         )
 
         # 3. Регистрируем ОБА сообщения по ключу (chat_id, message_id)
@@ -184,6 +189,7 @@ async def deliver_support_reply_to_user(
     admin_reply_message: types.Message,
     thread_store: SupportThreadStore,
     support_header: str = "💬 <b>Ответ службы поддержки:</b>",
+    expected_thread_id: int | None = None,
 ) -> tuple[bool, str]:
     """
     Доставляет ответ администратора пользователю в личный диалог.
@@ -192,6 +198,9 @@ async def deliver_support_reply_to_user(
     replied_to = admin_reply_message.reply_to_message
     if not replied_to:
         return False, "UNKNOWN_THREAD"
+    actual_thread_id = getattr(admin_reply_message, "message_thread_id", None) or None
+    if actual_thread_id != expected_thread_id:
+        return False, "WRONG_THREAD"
 
     resolve_ticket = getattr(thread_store, "resolve_ticket", None)
     target_ticket = None

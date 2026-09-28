@@ -33,6 +33,10 @@ class BotChassisConfig:
     enable_referrals: bool = False
     welcome_text: str | None = None  # HTML, как меню /start; None — текст шасси
     origin_bot_id: str | None = None
+    support_thread_id: int | None = None
+    audit_thread_id: int | None = None
+    ops_thread_id: int | None = None
+    events_thread_id: int | None = None
 
 
 def resolved_origin(config: BotChassisConfig) -> str:

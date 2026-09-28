@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramBadRequest
 from loguru import logger
 
 from ..config import BotChassisConfig
+from ..service_notify import deliver_service_message, resolve_service_destination
 
 
 async def send_admin_audit(
@@ -22,16 +23,16 @@ async def send_admin_audit(
     При is_html=True вызывающий экранирует пользовательские поля сам.
     Ошибка парсера Telegram откатывается на экранированный текст.
     """
-    chat_id = config.audit_chat_id
-    if chat_id is None or bot is None:
+    destination = resolve_service_destination(config, "audit")
+    if destination is None or bot is None:
         return
     payload = text if is_html else html.escape(text)
     try:
         try:
-            await bot.send_message(chat_id, payload, parse_mode="HTML")
+            await deliver_service_message(bot, destination, payload, parse_mode="HTML")
         except TelegramBadRequest:
             if not is_html:
                 raise
-            await bot.send_message(chat_id, html.escape(text), parse_mode="HTML")
+            await deliver_service_message(bot, destination, html.escape(text), parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось отправить аудит-лог")

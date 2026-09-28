@@ -193,6 +193,7 @@ async def create_complete_chassis(
                 extra_support_inline=resolved_support_inline,
                 before_chassis_menu_action=before_chassis_menu_action,
                 language_switch_enabled=config.enable_language_switch,
+                support_thread_id=config.support_thread_id,
             )
         )
 

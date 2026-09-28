@@ -76,10 +76,25 @@ class TestMountInvariants(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def test_network_mount_contract(self) -> None:
-        self.assertEqual(
-            tuple(BotChassisConfig.__dataclass_fields__)[-1],
+        fields = BotChassisConfig.__dataclass_fields__
+        for name in (
+            "bot_id",
+            "support_chat_id",
+            "audit_chat_id",
             "origin_bot_id",
-        )
+            "support_thread_id",
+            "audit_thread_id",
+            "ops_thread_id",
+            "events_thread_id",
+        ):
+            self.assertIn(name, fields)
+        legacy = BotChassisConfig("tenant_x")
+        self.assertIsNone(legacy.origin_bot_id)
+        self.assertIsNone(legacy.support_thread_id)
+        self.assertIsNone(legacy.audit_thread_id)
+        self.assertIsNone(legacy.ops_thread_id)
+        self.assertIsNone(legacy.events_thread_id)
+        self.assertEqual(legacy.db_path, "bot_chassis.db")
         self.assertEqual(tuple(SkuItem.__dataclass_fields__)[-1], "issues_voucher")
         self.assertEqual(resolved_alert_chat_id(self.config), self.config.audit_chat_id)
         self.assertEqual(

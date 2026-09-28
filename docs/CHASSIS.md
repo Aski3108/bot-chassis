@@ -121,7 +121,11 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `superadmin_ids` | `()` | Посев при `create_storage` |
 | `skus` | `()` | Каталог Stars |
 | `support_chat_id` | `None` | Тикеты поддержки |
-| `audit_chat_id` | `None` | Ошибки, оплаты и административные события; если не задан — `support_chat_id` |
+| `audit_chat_id` | `None` | Закрытый служебный чат суперадминов. Имя переменной остаётся `AUDIT_CHAT_ID`. Если не задан, ошибки и оплаты падают в `support_chat_id` |
+| `support_thread_id` | `None` | Тема обращений. `None` — общий чат, аргумент `message_thread_id` не передаётся |
+| `audit_thread_id` | `None` | Тема действий администратора и оплат |
+| `ops_thread_id` | `None` | Тема ошибок, рестартов и бэкапа |
+| `events_thread_id` | `None` | Тема новых пользователей, статусов и отчётов |
 | `welcome_text` | `None` | Текст носителя Reply-клавиатуры на `/start`. При выключенном переключателе языка и без `render_start_callback` остаётся прежний HTML шасси. При включённом переключателе носитель отделён от стартовой карточки с toggle |
 | `default_locale` | `"ru"` | ru / en |
 | `enable_buttons` | `True` | Нижнее меню |

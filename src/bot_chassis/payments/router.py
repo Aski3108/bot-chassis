@@ -6,7 +6,8 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from loguru import logger
 
-from ..config import BotChassisConfig, resolved_alert_chat_id, resolved_origin
+from ..config import BotChassisConfig, resolved_origin
+from ..service_notify import deliver_service_message, resolve_service_destination
 from ..ports.payments import SkuVoucher, SkuVoucherConsumerPort
 from ..storage import Storage
 from ..storage.repositories.transactions import VoucherRecord
@@ -69,7 +70,7 @@ def create_payments_router(
                 logger.error("successful_payment без пользователя и с битым payload")
                 await _notify_support(
                     message.bot,
-                    resolved_alert_chat_id(config),
+                    config,
                     f"Битый payload оплаты без пользователя. charge={payment.telegram_payment_charge_id}",
                 )
                 return
@@ -98,7 +99,7 @@ def create_payments_router(
         if invalid:
             await _notify_support(
                 message.bot,
-                resolved_alert_chat_id(config),
+                config,
                 f"Битый payload оплаты. charge={payment.telegram_payment_charge_id}",
             )
             return
@@ -110,7 +111,7 @@ def create_payments_router(
         if config.notify_on_payment:
             await _notify_support(
                 message.bot,
-                resolved_alert_chat_id(config),
+                config,
                 f"Оплата {payment.total_amount} {payment.currency}. sku={sku_code} user_id={user_id} charge={payment.telegram_payment_charge_id}",
             )
 
@@ -164,10 +165,12 @@ def _voucher(record: VoucherRecord) -> SkuVoucher:
     )
 
 
-async def _notify_support(bot, chat_id: int | None, text: str) -> None:
-    if chat_id is None:
-        return
+async def _notify_support(bot, config: BotChassisConfig, text: str) -> None:
     try:
-        await bot.send_message(chat_id, text)
+        await deliver_service_message(
+            bot,
+            resolve_service_destination(config, "payment"),
+            text,
+        )
     except Exception:
         logger.exception("Не удалось отправить уведомление об оплате")
