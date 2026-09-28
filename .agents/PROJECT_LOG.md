@@ -1,6 +1,19 @@
 # PROJECT_LOG — Bot Chassis
 
 Журнал работ в стабильной раме `C:\Python\bot_chassis`. Писать сюда при каждом изменении рамы.
+Это единственный project log. Корневой `project_log.md` не заводить.
+
+---
+
+## 2026-09-28 — Gate 0: control plane перед кодом 0.3
+
+**Почему.** Перед продуктовыми гейтами Operational Upgrade нужно зафиксировать control plane отдельным документационным коммитом, не смешивая его с кодом рамы.
+
+**Что сделано.** В Git вошли правила и состояние `.agents` (`AGENTS`, `NEW_CHAT`, `SESSION_STATE`, `PROJECT_CONTEXT`, `ACTIVE_PLANS`, `TASK_TODO`, план `UPGRADE_0_3_PLAN`, промпты реализации и аудита), правило `.cursor/rules/session-bootstrap.mdc`, ссылка на control plane из `docs/README.md` и игнор `.agents/local/`. После коммита создана ветка `feat/chassis-0.3` от того же снимка. Код рамы не менялся.
+
+**Проверка.** `pytest tests -q`: **110 passed**. `main` на момент старта содержал 9 локальных коммитов поверх `origin/main` (вершина `42c3cce`). Tag `profiling` = `6823f30`. Worktree `C:\tmp\bot_chassis_psybot_upgrade` чистый; `feat/psybot-network` (`faf10b7`) уже предок `main`.
+
+**Не тронуто.** `src/`, тесты, PsyBot, Chat Listener, Profiling, tag `profiling`, push, удаление worktree. Gate 1 не начат: сначала аудит B0.
 
 ---
 

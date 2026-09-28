@@ -13,7 +13,7 @@ Required on every commit that changes the frame:
 2. Append `VERSION_LOG.md` when the stable version or a tag moves: tag, HEAD, previous, why, commits included, consumers (Profiling / psybot).
 3. Keep `CHANGELOG.md` in sync with the version you tagged.
 
-Do not skip the logs because tests are green. Do not record chassis history only in `psybot_test`.
+Do not skip the logs because tests are green. Do not record chassis history only in `psybot_test`. Session snapshot is `.agents/SESSION_STATE.md`; it is not a micro-journal. Do not create a second log outside `.agents`.
 
 Profiling Framework uses tag `profiling` as the hold point. Do not switch Profiling to a new chassis checkout unless the owner says so in this chat.
 
