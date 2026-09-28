@@ -22,14 +22,15 @@
 
 Полностью прочитай по порядку:
 
-1. `.agents/AGENTS.md`
-2. `.agents/NEW_CHAT.md`
+1. `.agents/NEW_CHAT.md`
+2. `.agents/AGENTS.md`
 3. `.agents/SESSION_STATE.md`
 4. `.agents/PROJECT_CONTEXT.md`
 5. `.agents/ACTIVE_PLANS.md`
 6. `.agents/TASK_TODO.md`
 7. `.agents/UPGRADE_0_3_PLAN.md`
 8. релевантные разделы `docs/CHASSIS.md`
+9. последние релевантные записи `.agents/PROJECT_LOG.md`
 
 После этого проверь реальный diff `BASE_REF..HEAD_REF`, затронутый код, миграции
 и тесты. Не доверяй отчёту исполнителя без проверки репозитория.

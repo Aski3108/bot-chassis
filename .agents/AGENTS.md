@@ -11,28 +11,32 @@
 
 - Архитектурный чат фиксирует решения, границы и очередь. Код рамы он не
   пишет, пока владелец явно не смешает роли в этом чате.
-- Coding-чат реализует ровно один подтверждённый пункт `.agents/TASK_TODO.md`.
-- Не прыгать через пункты. Соседние «улучшения» и скрытые фиксы запрещены.
+- Coding-чат реализует ровно один подтверждённый Gate из
+  `.agents/TASK_TODO.md`; технические критерии Gate берёт только из
+  `.agents/UPGRADE_0_3_PLAN.md`.
+- Не прыгать через Gate. Соседние «улучшения» и скрытые фиксы запрещены.
 - Аудит соседнего кузова (Profiling, PsyBot, Chat Listener) этот репозиторий
   не заменяет и из этого корня не запускает.
 
 ## Bootstrap order
 
 1. `.agents/NEW_CHAT.md`
-2. `.agents/SESSION_STATE.md`
-3. `.agents/PROJECT_CONTEXT.md`
-4. `.agents/ACTIVE_PLANS.md`
-5. `.agents/TASK_TODO.md`
-6. `.agents/PROJECT_LOG.md` — только последние релевантные записи
-7. Канон рамы — `docs/CHASSIS.md`
-8. Если сдвинулась версия или тег — `VERSION_LOG.md` и `CHANGELOG.md`
+2. `.agents/AGENTS.md`
+3. `.agents/SESSION_STATE.md`
+4. `.agents/PROJECT_CONTEXT.md`
+5. `.agents/ACTIVE_PLANS.md`
+6. `.agents/TASK_TODO.md`
+7. `.agents/UPGRADE_0_3_PLAN.md` — если работа относится к `0.3`
+8. Канон рамы — `docs/CHASSIS.md`
+9. `.agents/PROJECT_LOG.md` — только последние релевантные записи
+10. Если сдвинулась версия или тег — `VERSION_LOG.md` и `CHANGELOG.md`
 
 ## Обязательные правила
 
 - Не создавать альтернативные session state, TODO или project log вне
   `.agents`. Корневой `project_log.md` в этой раме не заводить.
 - Перед правкой кода сверять `SESSION_STATE.md` и живую очередь
-  `TASK_TODO.md`. Не начинать пункт без подтверждения владельца.
+  `TASK_TODO.md`. Не начинать Gate без подтверждения владельца.
 - Одна доработка = одна проверка = один коммит. Новые параметры фабрики
   только keyword-only, в конец списка, по умолчанию `None`. Старый вызов
   без новых параметров обязан вести себя как сейчас.

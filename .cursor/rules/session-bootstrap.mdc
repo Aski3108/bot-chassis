@@ -10,11 +10,15 @@ The workspace root is Bot Chassis (`C:\Python\bot_chassis`). This is the frame, 
 Read in this order before planning or changing code:
 
 1. `.agents/NEW_CHAT.md`
-2. `.agents/SESSION_STATE.md`
-3. `.agents/TASK_TODO.md` — the live task queue
-4. `.agents/AGENTS.md` for control-plane rules
-5. `docs/CHASSIS.md` when the change touches the public contract
+2. `.agents/AGENTS.md` for control-plane rules
+3. `.agents/SESSION_STATE.md`
+4. `.agents/PROJECT_CONTEXT.md`
+5. `.agents/ACTIVE_PLANS.md`
+6. `.agents/TASK_TODO.md` — the live task queue
+7. `.agents/UPGRADE_0_3_PLAN.md` for any `0.3` Gate
+8. `docs/CHASSIS.md` for the public contract
+9. `.agents/PROJECT_LOG.md` — only the latest relevant entries
 
-Honor the explicit user command. Do not start a backlog item until the owner confirms that item.
+Honor the explicit user command. Do not start a Gate until the owner confirms that Gate.
 
 Do not create alternate state, TODO, log, or bootstrap files. Allowed living files: `.agents/SESSION_STATE.md`, `.agents/TASK_TODO.md`, `.agents/PROJECT_LOG.md`, `VERSION_LOG.md`, `CHANGELOG.md`.

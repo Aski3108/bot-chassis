@@ -8,17 +8,19 @@
 
 Прочитать по порядку:
 
-1. `.agents/AGENTS.md` — правила control plane;
-2. `.agents/SESSION_STATE.md` — фактическое состояние;
-3. `.agents/PROJECT_CONTEXT.md` — что это за продукт;
-4. `.agents/ACTIVE_PLANS.md` — какие треки живы;
-5. `.agents/TASK_TODO.md` — единственная живая очередь;
-6. `docs/CHASSIS.md` — канон рамы, не backlog;
-7. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
+1. `.agents/NEW_CHAT.md` — этот короткий вход;
+2. `.agents/AGENTS.md` — правила control plane;
+3. `.agents/SESSION_STATE.md` — фактическое состояние;
+4. `.agents/PROJECT_CONTEXT.md` — что это за продукт;
+5. `.agents/ACTIVE_PLANS.md` — какие треки живы;
+6. `.agents/TASK_TODO.md` — единственная живая очередь;
+7. `.agents/UPGRADE_0_3_PLAN.md` — технические критерии Gate `0.3`;
+8. `docs/CHASSIS.md` — канон рамы, не backlog;
+9. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
 
 ## Главные ограничения
 
-- Двигаться строго по указанию владельца. Пункт очереди не открывать самому.
+- Двигаться строго по указанию владельца. Gate очереди не открывать самому.
 - Из этого корня не менять PsyBot (`C:\Python\tg_psy_tests`) и Chat Listener
   (`C:\Python\tg_chat_listener`).
 - Не переключать checkout Profiling и не ретегать `profiling`.
@@ -38,12 +40,12 @@
 
 **Где правда:**
 
-- очередь: `.agents/TASK_TODO.md`;
-- план исполнения: `.agents/UPGRADE_0_3_PLAN.md`;
+- порядок и статусы Gate: `.agents/TASK_TODO.md`;
+- единственный технический план: `.agents/UPGRADE_0_3_PLAN.md`;
 - состояние: `.agents/SESSION_STATE.md`;
 - канон: `docs/CHASSIS.md`;
 - версии: `VERSION_LOG.md`, `CHANGELOG.md`.
 
-**Следующее действие:** независимый аудит B0 по `.agents/AUDIT_0_3_PROMPT.md`.
-Gate 1 не открывать, пока владелец не примет `PASS` или `PASS WITH NOTES`.
-Один запуск — один гейт. Listener не монтировать. L3 нет.
+**Следующее действие:** Gate 0 вместе с коррекцией после B0 закоммичен.
+Владелец открыл Gate 1. Один запуск — один Gate. Listener не монтировать.
+L3 нет.
