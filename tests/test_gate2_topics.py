@@ -45,7 +45,9 @@ class TestServiceTopics(unittest.IsolatedAsyncioTestCase):
 
         legacy = BotChassisConfig(bot_id="bot_a", support_chat_id=-100, ops_thread_id=33)
         ops = resolve_service_destination(legacy, "ops")
-        self.assertEqual((ops.chat_id, ops.thread_id), (-100, 33))
+        self.assertEqual((ops.chat_id, ops.thread_id), (-100, None))
+        self.assertIsNone(resolve_service_destination(legacy, "payment").thread_id)
+        self.assertIsNone(resolve_service_destination(legacy, "events").thread_id)
         self.assertIsNone(resolve_service_destination(legacy, "audit"))
 
     def test_seven_bots_share_one_group_with_separate_topics(self) -> None:
@@ -114,9 +116,10 @@ class TestServiceTopics(unittest.IsolatedAsyncioTestCase):
         store = SupportThreadStore(persistence_file=None)
         store.register(chat_id=-100, user_id=7, header_msg_id=10)
         reply = SimpleNamespace(
-            reply_to_message=SimpleNamespace(message_id=10),
+            reply_to_message=SimpleNamespace(message_id=10, message_thread_id=11),
             chat=SimpleNamespace(id=-100),
             message_thread_id=99,
+            message_id=20,
         )
         bot = AsyncMock()
         bot.id = 1
@@ -135,6 +138,7 @@ class TestServiceTopics(unittest.IsolatedAsyncioTestCase):
             bot,
             reply,
             store,
-            expected_thread_id=11,
+            expected_thread_id=22,
         )
         self.assertNotEqual(status, "WRONG_THREAD")
+        self.assertTrue(ok)

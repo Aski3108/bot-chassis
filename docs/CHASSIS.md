@@ -121,7 +121,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `superadmin_ids` | `()` | Посев при `create_storage` |
 | `skus` | `()` | Каталог Stars |
 | `support_chat_id` | `None` | Тикеты поддержки |
-| `audit_chat_id` | `None` | Закрытый служебный чат суперадминов. Имя переменной остаётся `AUDIT_CHAT_ID`. Если не задан, ошибки и оплаты падают в `support_chat_id` |
+| `audit_chat_id` | `None` | Закрытый служебный чат суперадминов. Имя переменной остаётся `AUDIT_CHAT_ID`. Если не задан, ошибки и оплаты падают в общий `support_chat_id` без audit/ops/events thread ID |
 | `support_thread_id` | `None` | Тема обращений. `None` — общий чат, аргумент `message_thread_id` не передаётся |
 | `audit_thread_id` | `None` | Тема действий администратора и оплат |
 | `ops_thread_id` | `None` | Тема ошибок, рестартов и бэкапа |

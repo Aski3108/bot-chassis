@@ -29,14 +29,26 @@ def resolve_service_destination(config: BotChassisConfig, channel: str) -> Servi
         chat_id = config.audit_chat_id
         thread_id = config.audit_thread_id
     elif channel == "payment":
-        chat_id = config.audit_chat_id or config.support_chat_id
-        thread_id = config.audit_thread_id
+        if config.audit_chat_id is not None:
+            chat_id = config.audit_chat_id
+            thread_id = config.audit_thread_id
+        else:
+            chat_id = config.support_chat_id
+            thread_id = None
     elif channel == "ops":
-        chat_id = config.audit_chat_id or config.support_chat_id
-        thread_id = config.ops_thread_id
+        if config.audit_chat_id is not None:
+            chat_id = config.audit_chat_id
+            thread_id = config.ops_thread_id
+        else:
+            chat_id = config.support_chat_id
+            thread_id = None
     elif channel == "events":
-        chat_id = config.audit_chat_id or config.support_chat_id
-        thread_id = config.events_thread_id
+        if config.audit_chat_id is not None:
+            chat_id = config.audit_chat_id
+            thread_id = config.events_thread_id
+        else:
+            chat_id = config.support_chat_id
+            thread_id = None
     else:
         raise ValueError(f"unknown service channel: {channel}")
     if chat_id is None:

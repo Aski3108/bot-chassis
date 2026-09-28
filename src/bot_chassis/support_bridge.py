@@ -25,6 +25,7 @@ from .service_notify import thread_kwargs
 from .storage.sqlite_support_thread_store import TicketLimitExceeded
 
 DEFAULT_SUPPORT_PERSISTENCE_PATH = os.path.join("temp", "support_threads.json")
+_MISSING_THREAD_ID = object()
 
 
 class SupportThreadStore:
@@ -199,7 +200,13 @@ async def deliver_support_reply_to_user(
     if not replied_to:
         return False, "UNKNOWN_THREAD"
     actual_thread_id = getattr(admin_reply_message, "message_thread_id", None) or None
-    if actual_thread_id != expected_thread_id:
+    source_thread_id = getattr(replied_to, "message_thread_id", _MISSING_THREAD_ID)
+    if source_thread_id is _MISSING_THREAD_ID:
+        # Совместимость со старыми/fake Message без поля: используем настройку роутера.
+        source_thread_id = expected_thread_id
+    else:
+        source_thread_id = source_thread_id or None
+    if actual_thread_id != source_thread_id:
         return False, "WRONG_THREAD"
 
     resolve_ticket = getattr(thread_store, "resolve_ticket", None)
