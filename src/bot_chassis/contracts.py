@@ -11,12 +11,12 @@ from typing import Optional, Sequence
 
 # Русские названия кнопок (по умолчанию)
 BTN_CABINET_RU: str = "👤 Личный кабинет"
-BTN_INFO_RU: str = "ℹ️ Info"
+BTN_INFO_RU: str = "ℹ️ Info/FAQ"
 BTN_SUPPORT_RU: str = "💬 Поддержка"
 
 # Английские названия кнопок
 BTN_CABINET_EN: str = "👤 Account"
-BTN_INFO_EN: str = "ℹ️ Info"
+BTN_INFO_EN: str = "ℹ️ Info/FAQ"
 BTN_SUPPORT_EN: str = "💬 Support"
 
 # Канонические дефолты
@@ -40,6 +40,8 @@ LEGACY_BTN_INFO_ALIASES = frozenset({
     "Info",
     "О сервисе",
     "ℹ️ О сервисе",
+    "ℹ️ Info",
+    "ℹ️ Info / FAQ ❓",
     "Информация",
     "FAQ",
     BTN_INFO_RU,

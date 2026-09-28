@@ -122,7 +122,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `skus` | `()` | Каталог Stars |
 | `support_chat_id` | `None` | Тикеты поддержки |
 | `audit_chat_id` | `None` | Ошибки, оплаты и административные события; если не задан — `support_chat_id` |
-| `welcome_text` | `None` | HTML для `/start`; `None` — текст шасси |
+| `welcome_text` | `None` | Текст носителя Reply-клавиатуры на `/start`. Без `render_start_callback` и при `None` остаётся прежний HTML шасси. С callback `None` даёт короткое «Главное меню» и не создаёт третье сообщение |
 | `default_locale` | `"ru"` | ru / en |
 | `enable_buttons` | `True` | Нижнее меню |
 | `enable_admin` | `True` | `/admin` и команды |
@@ -161,6 +161,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
 | `extra_user_dossier_lines` | старый текст `/user` | Доп. строки внизу досье; `callable(user_id) -> sequence[str]` |
 | `extra_user_dossier_rows` | старые кнопки `/user` | Ряды кнопок перед «Главное меню админки»; клики — `extra_admin_actions` |
+| `render_start_callback` | `None` | Единый стартовый экран кузова. `None` — только носитель клавиатуры, как раньше |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
@@ -189,11 +190,21 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 ### 5.1 Кнопки
 
-Постоянный `ReplyKeyboardMarkup`, приватные команды `/start` `/menu` `/help` `/support`, синее меню через `register_button_chassis_startup`.
+Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  
 Мост поддержки: JSON `SupportThreadStore` остаётся compatibility default. Для сети кузов явно передаёт `SqliteSupportThreadStore`; dual-write нет.
+
+#### Миграция кузова на единый `/start`
+
+Рама — единственный владелец `Command("start")`. Кузов удаляет свой обработчик и передаёт `render_start_callback`.
+
+1. Удалить кузовной `Command("start")`. Пока он стоит на `domain_router`, диспетчер отдаёт `/start` ему, и носитель рамы не отправляется.
+2. Передать `render_start_callback(context)`. `context` содержит `message`, `user_id`, `bot` и `locale`.
+3. Не слать из callback второе приветствие с Reply-клавиатурой. Клавиатуру уже несёт сообщение рамы: `welcome_text` либо короткое «Главное меню».
+4. Проверить живой `/start`: ровно один носитель клавиатуры и ровно одна стартовая карточка callback. Третье сообщение или ответ старого обработчика значит, что миграция не закончена.
+5. «Назад» из поддержки позже вызывает тот же callback. Отдельный стартовый экран для возврата не писать.
 
 ### 5.2 Storage
 
@@ -210,7 +221,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 
 Порядок: ErrorAlert → Throttling → UserActivity.
 
-- Ошибки хэндлера → `audit_chat_id or support_chat_id`, если тумблер включён.  
+- Ошибки хэндлера → `audit_chat_id or support_chat_id`, если тумблер включён. Пользователю уходят две строки без эмодзи: «Произошла непредвиденная ошибка.» и «Мы уже занимаемся этим вопросом.» Traceback остаётся в служебном чате.
 - Троттлинг 5/с; `pre_checkout_query` и `successful_payment` не режутся.  
 - UserActivity: upsert, локаль, тень (админов не глушит, платежи не дропает), first-touch `traffic_source`, при `enable_referrals` — `/start ref_<id>`.
 
@@ -245,7 +256,7 @@ SKU с `issues_voucher=False` (например, донат) сохраняет�
 
 ## 6. Инварианты
 
-1. Кнопочный каркас и `bot_gateway.py` не трогать; 19 тестов `tests/test_chassis.py` зелёные.  
+1. `bot_gateway.py` не трогать. В `tests/test_chassis.py` по-прежнему 19 тестов; для контракта меню `0.3` изменены только `test_main_menu_keyboard_toggles_and_domain_rows`, `test_register_button_chassis_startup_hook` и `test_setup_bot_commands_merges_custom_commands`.
 2. Кузов зовёт порты сам.  
 3. v1 — только официальные Stars.  
 4. `bot_id` обязателен во всех SQL.  

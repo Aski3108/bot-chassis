@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Awaitable, Callable, Sequence
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram import F
@@ -31,6 +31,17 @@ from .storage import Storage, create_storage
 from .support_bridge import SupportThreadStore
 
 _MENU_TEXT = "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:"
+_START_CARRIER_TEXT = "Главное меню"
+
+
+@dataclass(frozen=True, slots=True)
+class StartRenderContext:
+    """Контекст единого стартового экрана кузова."""
+
+    message: Message
+    user_id: int
+    bot: Bot | None
+    locale: str
 
 
 @dataclass(slots=True)
@@ -70,6 +81,7 @@ async def create_complete_chassis(
     before_chassis_menu_action=None,
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
+    render_start_callback: Callable[[StartRenderContext], Awaitable[None]] | None = None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -133,7 +145,14 @@ async def create_complete_chassis(
             resolved_pending = PendingInputStore()
         screens = UserScreenTracker()
         dp.include_router(
-            _create_start_router(config, locale_cache, domain_rows, resolved_pending, screens)
+            _create_start_router(
+                config,
+                locale_cache,
+                domain_rows,
+                resolved_pending,
+                screens,
+                render_start_callback=render_start_callback,
+            )
         )
         dp.include_router(
             create_button_chassis_router(
@@ -175,6 +194,7 @@ def _create_start_router(
     domain_rows: Sequence[Sequence[str]] | None,
     pending: PendingInputStore,
     screens: UserScreenTracker,
+    render_start_callback: Callable[[StartRenderContext], Awaitable[None]] | None = None,
 ) -> Router:
     router = Router(name="chassis_start")
 
@@ -188,11 +208,20 @@ def _create_start_router(
         if message.bot is not None:
             await screens.close_previous_card(message.bot, user_id)
         locale = locale_cache.get(user_id) or config.default_locale
-        welcome = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
-        await message.answer(
-            welcome,
-            reply_markup=build_main_menu_keyboard(domain_rows=domain_rows, locale=locale),
-            parse_mode="HTML",
+        keyboard = build_main_menu_keyboard(domain_rows=domain_rows, locale=locale)
+        if render_start_callback is None:
+            welcome = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
+            await message.answer(welcome, reply_markup=keyboard, parse_mode="HTML")
+            return
+        carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
+        await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+        await render_start_callback(
+            StartRenderContext(
+                message=message,
+                user_id=user_id,
+                bot=message.bot,
+                locale=locale,
+            )
         )
 
     return router

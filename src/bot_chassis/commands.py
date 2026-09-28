@@ -22,10 +22,7 @@ async def setup_bot_commands(
     Гарантирует доступность синей кнопки «Меню» в клиенте Telegram для всех пользователей.
     """
     default_commands = [
-        BotCommand(command="start", description="🚀 Главное меню"),
         BotCommand(command="menu", description="📱 Восстановить кнопки меню"),
-        BotCommand(command="help", description="ℹ️ О сервисе и инструкция"),
-        BotCommand(command="support", description="💬 Служба поддержки"),
     ]
     commands_map = {c.command: c for c in default_commands}
     if custom_commands:

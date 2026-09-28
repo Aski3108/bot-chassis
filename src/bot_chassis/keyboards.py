@@ -32,9 +32,8 @@ def build_main_menu_keyboard(
     Создает нижнюю Reply-клавиатуру:
     - Если переданы domain_rows — они размещаются ВЕРХНИМИ рядами над служебной тройкой.
       (Например, для Chat Listener: [["Ваши чаты", "Ваши слова"]]).
-    - Ниже размещаются служебные кнопки (в зависимости от тумблеров):
-        [👤 Личный кабинет]
-        [ℹ️ Info] [💬 Поддержка]
+    - Ниже включённые служебные кнопки всегда стоят в одном ряду:
+        [👤 Личный кабинет] [ℹ️ Info/FAQ] [💬 Поддержка]
     """
     labels = MenuLabels.for_locale(locale)
     keyboard: list[list[KeyboardButton]] = []
@@ -46,18 +45,16 @@ def build_main_menu_keyboard(
             if valid_btns:
                 keyboard.append(valid_btns)
 
-    # 2. Служебная тройка с тумблерами
+    # 2. Все включённые служебные кнопки — один ряд
+    service_row: list[KeyboardButton] = []
     if enable_cabinet:
-        keyboard.append([KeyboardButton(text=labels.cabinet)])
-
-    second_row: list[KeyboardButton] = []
+        service_row.append(KeyboardButton(text=labels.cabinet))
     if enable_info:
-        second_row.append(KeyboardButton(text=labels.info))
+        service_row.append(KeyboardButton(text=labels.info))
     if enable_support:
-        second_row.append(KeyboardButton(text=labels.support))
-
-    if second_row:
-        keyboard.append(second_row)
+        service_row.append(KeyboardButton(text=labels.support))
+    if service_row:
+        keyboard.append(service_row)
 
     return ReplyKeyboardMarkup(
         keyboard=keyboard,

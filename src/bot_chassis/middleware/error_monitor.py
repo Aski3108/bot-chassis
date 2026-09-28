@@ -12,7 +12,7 @@ from loguru import logger
 
 from ..config import BotChassisConfig, resolved_alert_chat_id
 
-_USER_ERROR = "⚠️ Произошла непредвиденная ошибка. Мы уже разбираемся!"
+_USER_ERROR = "Произошла непредвиденная ошибка.\nМы уже занимаемся этим вопросом."
 _PAYMENT_ERROR = "⚠️ Ошибка при обработке платежа."
 
 

@@ -27,8 +27,7 @@ from loguru import logger
 from .contracts import (
     BTN_CABINET_RU,
     BTN_CABINET_EN,
-    BTN_INFO_RU,
-    BTN_INFO_EN,
+    LEGACY_BTN_INFO_ALIASES,
     BTN_SUPPORT_RU,
     BTN_SUPPORT_EN,
     is_main_menu_button,
@@ -192,7 +191,7 @@ def create_button_chassis_router(
     # 3. РАЗДЕЛ: [ℹ️ Info] (кнопка меню и команда /help)
     # ----------------------------------------------------------------------
     if enable_info:
-        info_aliases = {BTN_INFO_RU, BTN_INFO_EN, "Info", "О сервисе", "ℹ️ О сервисе", "Информация", "FAQ"}
+        info_aliases = set(LEGACY_BTN_INFO_ALIASES)
 
         async def _open_info(message: types.Message):
             user_id = message.from_user.id if message.from_user else 0

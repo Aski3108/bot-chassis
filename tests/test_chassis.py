@@ -97,6 +97,12 @@ class TestButtonChassisUnit(unittest.TestCase):
         self.assertEqual(kb.keyboard[0][1].text, "🔍 Ваши слова")
         self.assertEqual(kb.keyboard[1][0].text, BTN_INFO_RU)
         self.assertEqual(kb.keyboard[1][1].text, BTN_SUPPORT_RU)
+        full = build_main_menu_keyboard()
+        self.assertEqual(len(full.keyboard), 1)
+        self.assertEqual(
+            [button.text for button in full.keyboard[0]],
+            [BTN_CABINET_RU, "ℹ️ Info/FAQ", BTN_SUPPORT_RU],
+        )
 
     def test_domain_labels_cancel_support_ticket(self):
         """Проверка, что нажатие доменной кнопки сбрасывает режим тикета поддержки."""
@@ -199,9 +205,8 @@ class TestButtonChassisUnit(unittest.TestCase):
         args, kwargs = bot.set_my_commands.call_args
         commands = kwargs.get("commands") or args[0]
         cmd_names = [c.command for c in commands]
-        self.assertIn("menu", cmd_names)
-        self.assertIn("help", cmd_names)
-        self.assertIn("support", cmd_names)
+        self.assertEqual(cmd_names, ["menu"])
+        self.assertEqual(commands[0].description, "📱 Восстановить кнопки меню")
 
     def test_setup_bot_commands_merges_custom_commands(self):
         """Проверка, что кастомные команды дополняют команды шасси, а не стирают их."""
@@ -214,11 +219,10 @@ class TestButtonChassisUnit(unittest.TestCase):
         args, kwargs = bot.set_my_commands.call_args
         commands = kwargs.get("commands") or args[0]
         cmd_names = [c.command for c in commands]
-        self.assertIn("start", cmd_names)
-        self.assertIn("menu", cmd_names)
-        self.assertIn("help", cmd_names)
-        self.assertIn("support", cmd_names)
-        self.assertIn("detect", cmd_names)
+        self.assertEqual(cmd_names, ["menu", "detect"])
+        self.assertNotIn("start", cmd_names)
+        self.assertNotIn("help", cmd_names)
+        self.assertNotIn("support", cmd_names)
 
     def test_active_task_tracker_handles_none_task(self):
         """Проверка дедупликации кликов в ActiveTaskTracker даже при current_task is None."""
