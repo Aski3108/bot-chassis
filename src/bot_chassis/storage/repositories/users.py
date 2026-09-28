@@ -22,6 +22,8 @@ class UserRecord:
     created_at: str
     traffic_source: Optional[str] = None
     is_shadow_banned: bool = False
+    telegram_language_code: Optional[str] = None
+    locale_source: str = "legacy"
 
 
 def _row_to_user(row) -> UserRecord:
@@ -38,6 +40,8 @@ def _row_to_user(row) -> UserRecord:
         created_at=row["created_at"],
         traffic_source=row["traffic_source"],
         is_shadow_banned=bool(row["is_shadow_banned"]),
+        telegram_language_code=row["telegram_language_code"] if "telegram_language_code" in row.keys() else None,
+        locale_source=row["locale_source"] if "locale_source" in row.keys() else "legacy",
     )
 
 
@@ -96,6 +100,69 @@ class UsersRepository:
                 (language_code, utc_now(), bot_id, user_id),
             )
             return cur.rowcount > 0
+
+        return await self._engine.run(_op)
+
+    async def set_manual_locale(self, bot_id: str, user_id: int, language_code: str) -> bool:
+        """Ручной выбор. Дальше автоматика не меняет language_code."""
+
+        def _op(conn) -> bool:
+            cur = conn.execute(
+                """
+                UPDATE users
+                SET language_code = ?, locale_source = 'manual', updated_at = ?
+                WHERE bot_id = ? AND user_id = ?
+                """,
+                (language_code, utc_now(), bot_id, user_id),
+            )
+            return cur.rowcount > 0
+
+        return await self._engine.run(_op)
+
+    async def record_telegram_visit(
+        self,
+        bot_id: str,
+        user_id: int,
+        username: Optional[str],
+        first_name: Optional[str],
+        last_name: Optional[str],
+        telegram_language_code: Optional[str],
+        resolved_locale: str,
+    ) -> UserRecord:
+        """Первый визит записывает вычисленную локаль. Повтор только обновляет сырой код."""
+
+        def _op(conn) -> UserRecord:
+            conn.execute(
+                """
+                INSERT INTO users (
+                    bot_id, user_id, username, first_name, last_name,
+                    language_code, telegram_language_code, locale_source, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?)
+                ON CONFLICT(bot_id, user_id) DO UPDATE SET
+                    username = COALESCE(excluded.username, users.username),
+                    first_name = COALESCE(excluded.first_name, users.first_name),
+                    last_name = COALESCE(excluded.last_name, users.last_name),
+                    telegram_language_code = excluded.telegram_language_code,
+                    language_code = users.language_code,
+                    locale_source = users.locale_source,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    bot_id,
+                    user_id,
+                    username,
+                    first_name,
+                    last_name,
+                    resolved_locale,
+                    telegram_language_code,
+                    utc_now(),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM users WHERE bot_id = ? AND user_id = ?",
+                (bot_id, user_id),
+            ).fetchone()
+            return _row_to_user(row)
 
         return await self._engine.run(_op)
 

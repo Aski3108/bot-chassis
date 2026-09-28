@@ -3,7 +3,7 @@
 **Дата:** 2026-09-28
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** коммит Gate 1 `feat(buttons): update menu contract` (поверх коррекции Gate 0 `2605eb0`)
+**HEAD:** коммит Gate 1A `feat(locale): add persistent one-click ru-en switch` (поверх Gate 1 `a03850d`)
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.2.2` (tag `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112`)
 **Profiling hold:** tag `profiling` = `6823f30`
@@ -102,11 +102,10 @@ bootstrap выровнен. Код и тесты не менялись.
 `C:\tmp\bot_chassis_psybot_upgrade` зарегистрирован на `faf10b7`, который
 является предком `main`; удаление не выполнялось.
 
-Gate 1 выполнен на `feat/chassis-0.3`: один служебный ряд, подпись
-`ℹ️ Info/FAQ`, видимая команда `/menu`, скрытые `/start` `/help` `/support`,
-две строки ошибки без эмодзи и `render_start_callback` с прежним поведением
-при `None`. Полный сьют: 117 passed. Gate 1A не начат. Независимый аудит B1
-наступает только после Gate 1A. Push не делался.
+Gate 1 и Gate 1A выполнены на `feat/chassis-0.3`. Переключатель один,
+первый язык считается по RU-группе, ручной выбор хранится как `manual`.
+Полный сьют после Gate 1A: 129 passed. Следующий шаг — независимый аудит B1.
+Gate 2 не начинать до `PASS` или принятого `PASS WITH NOTES`. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен

@@ -128,7 +128,7 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
             render_start_callback=render_start,
         )
         await chassis.dp.feed_update(self.bot, Update(update_id=1, message=_private_message(7, "/start")))
-        self.assertEqual(cards, ["ru"])
+        self.assertEqual(cards, ["en"])
         self.assertEqual(_send_texts(self.session), ["<b>Носитель</b>", "START CARD"])
 
     async def test_start_without_callback_keeps_single_legacy_menu(self) -> None:

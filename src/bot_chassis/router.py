@@ -42,6 +42,7 @@ from .keyboards import (
 from .lifecycle import UserScreenTracker, CardClosePolicy
 from .dispatcher import ActiveTaskTracker
 from .followup import PendingInputStore, PendingInput, PendingInputKind
+from .localization import ChassisScreen, MarkupContext, decorate_info_markup
 from .support_bridge import (
     SupportThreadStore,
     send_user_report_to_support,
@@ -94,6 +95,7 @@ def create_button_chassis_router(
     extra_support_inline: Optional[Sequence[Sequence[tuple[str, str]]]] = None,
     *,
     before_chassis_menu_action: Optional[Callable[[int], Awaitable[None]]] = None,
+    language_switch_enabled: bool = False,
 ) -> Router:
     """
     Фабрика универсального роутера шасси кнопок.
@@ -206,7 +208,31 @@ def create_button_chassis_router(
 
                 if render_info_callback:
                     sent = await render_info_callback(message, user_id, message.bot)
-                    if sent and isinstance(sent, types.Message):
+                    if isinstance(sent, ChassisScreen):
+                        markup = sent.markup
+                        if language_switch_enabled:
+                            markup = decorate_info_markup(
+                                markup,
+                                MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
+                            )
+                        delivered = await message.answer(
+                            sent.text,
+                            reply_markup=markup,
+                            parse_mode=sent.parse_mode,
+                        )
+                        screens.remember_card(
+                            user_id,
+                            delivered.chat.id,
+                            delivered.message_id,
+                            policy=info_close_policy,
+                        )
+                    elif sent and isinstance(sent, types.Message):
+                        if language_switch_enabled:
+                            logger.warning(
+                                "render_info_callback уже отправил Message. "
+                                "Языковая кнопка не вставлена. Верните ChassisScreen "
+                                "или вызовите decorate_info_markup до отправки."
+                            )
                         screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
                     else:
                         logger.warning(

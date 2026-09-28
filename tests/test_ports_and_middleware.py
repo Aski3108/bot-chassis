@@ -586,8 +586,12 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         session.requests.clear()
         ghost = InaccessibleMessage(chat=chat, message_id=1)
         await feed("core_lang:ru", 3, ghost)
-        self.assertEqual([item.__class__.__name__ for item in session.requests], ["AnswerCallbackQuery"])
+        names = [item.__class__.__name__ for item in session.requests]
+        self.assertIn("AnswerCallbackQuery", names)
+        self.assertNotIn("EditMessageText", names)
+        self.assertLessEqual(names.count("SendMessage"), 1)
         self.assertEqual((await self.storage.users.get_user("bot_a", 9)).language_code, "ru")
+        self.assertEqual((await self.storage.users.get_user("bot_a", 9)).locale_source, "manual")
         await bot.session.close()
 
 

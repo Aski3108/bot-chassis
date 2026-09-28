@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
     first_name TEXT,
     last_name TEXT,
     language_code TEXT NOT NULL DEFAULT 'ru',
+    telegram_language_code TEXT,             -- сырой код Telegram, только диагностика
+    locale_source TEXT NOT NULL DEFAULT 'legacy', -- 'auto' | 'manual' | 'legacy'
     is_banned INTEGER NOT NULL DEFAULT 0,
     ban_reason TEXT,
     is_shadow_banned INTEGER NOT NULL DEFAULT 0, -- 1 = тихий сброс спамера (подтверждено архитектором)

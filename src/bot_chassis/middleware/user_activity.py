@@ -8,6 +8,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import TelegramObject, Update
 
 from ..config import BotChassisConfig
+from ..localization import InitialLocalePolicy, resolve_initial_locale
 from ..storage import Storage
 
 
@@ -18,11 +19,15 @@ class UserActivityMiddleware(BaseMiddleware):
         storage: Storage,
         config: BotChassisConfig,
         locale_cache: dict[int, str] | None = None,
+        locale_policy: InitialLocalePolicy | None = None,
+        locale_resolver: Callable[[str | None], str] | None = None,
     ) -> None:
         self._bot_id = bot_id
         self._storage = storage
         self._config = config
         self._locale_cache = locale_cache
+        self._locale_policy = locale_policy or InitialLocalePolicy()
+        self._locale_resolver = locale_resolver
 
     async def __call__(
         self,
@@ -34,13 +39,20 @@ class UserActivityMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        user_record = await self._storage.users.upsert_user(
+        raw_language = user.language_code
+        resolved = (
+            self._locale_resolver(raw_language)
+            if self._locale_resolver is not None
+            else resolve_initial_locale(raw_language, self._locale_policy)
+        )
+        user_record = await self._storage.users.record_telegram_visit(
             self._bot_id,
             user.id,
             user.username,
             user.first_name,
             user.last_name,
-            user.language_code,
+            raw_language,
+            resolved,
         )
         if self._locale_cache is not None and user_record:
             self._locale_cache[user.id] = user_record.language_code

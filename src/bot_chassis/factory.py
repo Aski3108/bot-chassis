@@ -17,7 +17,13 @@ from .dispatcher import ActiveTaskTracker
 from .followup import PendingInputStore
 from .keyboards import build_main_menu_keyboard
 from .lifecycle import UserScreenTracker
-from .localization import create_localization_router
+from .localization import (
+    ChassisScreen,
+    InitialLocalePolicy,
+    MarkupContext,
+    create_localization_router,
+    decorate_info_markup,
+)
 from .middleware import register_chassis_middlewares
 from .payments.router import create_payments_router
 from .ports.access import AccessPort, DefaultAccessAdapter
@@ -81,14 +87,23 @@ async def create_complete_chassis(
     before_chassis_menu_action=None,
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
-    render_start_callback: Callable[[StartRenderContext], Awaitable[None]] | None = None,
+    render_start_callback: Callable[[StartRenderContext], Awaitable[object]] | None = None,
+    on_locale_changed=None,
+    initial_locale_policy: InitialLocalePolicy | None = None,
+    initial_locale_resolver: Callable[[str | None], str] | None = None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
     if dp is None:
         dp = Dispatcher()
 
-    locale_cache = register_chassis_middlewares(dp, config=config, storage=storage)
+    locale_cache = register_chassis_middlewares(
+        dp,
+        config=config,
+        storage=storage,
+        locale_policy=initial_locale_policy,
+        locale_resolver=initial_locale_resolver,
+    )
     work_gate = DefaultWorkGateAdapter(storage.bot_settings, storage.users)
     access = DefaultAccessAdapter(storage.subscriptions)
     vouchers = vouchers_provider or DefaultVoucherManagerAdapter(storage.transactions)
@@ -124,6 +139,7 @@ async def create_complete_chassis(
             enabled=config.enable_language_switch,
             locale_cache=locale_cache,
             domain_rows=domain_rows,
+            on_locale_changed=on_locale_changed,
         )
     )
     if domain_router is not None:
@@ -152,6 +168,7 @@ async def create_complete_chassis(
                 resolved_pending,
                 screens,
                 render_start_callback=render_start_callback,
+                language_switch_enabled=config.enable_language_switch,
             )
         )
         dp.include_router(
@@ -169,6 +186,7 @@ async def create_complete_chassis(
                 render_info_callback=render_info_callback,
                 extra_support_inline=resolved_support_inline,
                 before_chassis_menu_action=before_chassis_menu_action,
+                language_switch_enabled=config.enable_language_switch,
             )
         )
 
@@ -194,7 +212,8 @@ def _create_start_router(
     domain_rows: Sequence[Sequence[str]] | None,
     pending: PendingInputStore,
     screens: UserScreenTracker,
-    render_start_callback: Callable[[StartRenderContext], Awaitable[None]] | None = None,
+    render_start_callback: Callable[[StartRenderContext], Awaitable[object]] | None = None,
+    language_switch_enabled: bool = False,
 ) -> Router:
     router = Router(name="chassis_start")
 
@@ -215,7 +234,7 @@ def _create_start_router(
             return
         carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
         await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
-        await render_start_callback(
+        rendered = await render_start_callback(
             StartRenderContext(
                 message=message,
                 user_id=user_id,
@@ -223,5 +242,11 @@ def _create_start_router(
                 locale=locale,
             )
         )
+        if not isinstance(rendered, ChassisScreen):
+            return
+        markup = rendered.markup
+        if language_switch_enabled:
+            markup = decorate_info_markup(markup, MarkupContext(locale=locale, user_id=user_id))
+        await message.answer(rendered.text, reply_markup=markup, parse_mode=rendered.parse_mode)
 
     return router

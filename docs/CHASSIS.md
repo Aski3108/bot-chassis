@@ -161,7 +161,10 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
 | `extra_user_dossier_lines` | старый текст `/user` | Доп. строки внизу досье; `callable(user_id) -> sequence[str]` |
 | `extra_user_dossier_rows` | старые кнопки `/user` | Ряды кнопок перед «Главное меню админки»; клики — `extra_admin_actions` |
-| `render_start_callback` | `None` | Единый стартовый экран кузова. `None` — только носитель клавиатуры, как раньше |
+| `render_start_callback` | `None` | Единый стартовый экран кузова. `None` — только носитель клавиатуры, как раньше. Объект `ChassisScreen` рама отправляет второй карточкой |
+| `on_locale_changed` | `None` | После ручной смены языка. `None` — рама обновляет только свои экраны |
+| `initial_locale_policy` | группа RU из плана | Базовые коды Telegram, которые дают `ru`; остальное → `en` |
+| `initial_locale_resolver` | `None` | Замена политики. `None` — штатный разбор `language_code` |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 

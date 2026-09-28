@@ -88,6 +88,12 @@ class StorageEngine:
                     """
                 )
                 _rebuild_transaction_payment_key_if_needed(conn)
+            if _table_exists(conn, "users"):
+                _add_column_if_missing(conn, "ALTER TABLE users ADD COLUMN telegram_language_code TEXT")
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE users ADD COLUMN locale_source TEXT NOT NULL DEFAULT 'legacy'",
+                )
             if _table_exists(conn, "support_threads"):
                 _add_column_if_missing(
                     conn,
