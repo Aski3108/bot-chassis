@@ -3,7 +3,7 @@
 **Дата:** 2026-09-28
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** коммит Gate 1A `feat(locale): add persistent one-click ru-en switch` (поверх Gate 1 `a03850d`)
+**HEAD:** коммит коррекции B1 (поверх Gate 1A `62ffdf6`)
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.2.2` (tag `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112`)
 **Profiling hold:** tag `profiling` = `6823f30`
@@ -102,10 +102,12 @@ bootstrap выровнен. Код и тесты не менялись.
 `C:\tmp\bot_chassis_psybot_upgrade` зарегистрирован на `faf10b7`, который
 является предком `main`; удаление не выполнялось.
 
-Gate 1 и Gate 1A выполнены на `feat/chassis-0.3`. Переключатель один,
-первый язык считается по RU-группе, ручной выбор хранится как `manual`.
-Полный сьют после Gate 1A: 129 passed. Следующий шаг — независимый аудит B1.
-Gate 2 не начинать до `PASS` или принятого `PASS WITH NOTES`. Push не делался.
+Gate 1 и Gate 1A выполнены на `feat/chassis-0.3`. Первый B1 нашёл четыре
+дефекта; все исправлены в незакоммиченном ремонтном diff. Дефолтные Start/Info
+имеют toggle, стартовая карточка отслеживается, системные команды защищены,
+старый доменный `/start` отклоняется при сборке. Повторный B1: PASS. Узкий набор: 21 passed; полный сьют после ремонта:
+131 passed; замороженный `tests/test_chassis.py`: 19 passed. Ремонт
+закоммичен отдельно. Gate 2 не начат. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен

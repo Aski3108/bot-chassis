@@ -122,7 +122,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `skus` | `()` | Каталог Stars |
 | `support_chat_id` | `None` | Тикеты поддержки |
 | `audit_chat_id` | `None` | Ошибки, оплаты и административные события; если не задан — `support_chat_id` |
-| `welcome_text` | `None` | Текст носителя Reply-клавиатуры на `/start`. Без `render_start_callback` и при `None` остаётся прежний HTML шасси. С callback `None` даёт короткое «Главное меню» и не создаёт третье сообщение |
+| `welcome_text` | `None` | Текст носителя Reply-клавиатуры на `/start`. При выключенном переключателе языка и без `render_start_callback` остаётся прежний HTML шасси. При включённом переключателе носитель отделён от стартовой карточки с toggle |
 | `default_locale` | `"ru"` | ru / en |
 | `enable_buttons` | `True` | Нижнее меню |
 | `enable_admin` | `True` | `/admin` и команды |
@@ -161,7 +161,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `before_chassis_menu_action` | ничего не вызывать | `async (user_id)` перед Кабинетом, Info и Поддержкой |
 | `extra_user_dossier_lines` | старый текст `/user` | Доп. строки внизу досье; `callable(user_id) -> sequence[str]` |
 | `extra_user_dossier_rows` | старые кнопки `/user` | Ряды кнопок перед «Главное меню админки»; клики — `extra_admin_actions` |
-| `render_start_callback` | `None` | Единый стартовый экран кузова. `None` — только носитель клавиатуры, как раньше. Объект `ChassisScreen` рама отправляет второй карточкой |
+| `render_start_callback` | `None` | Единый стартовый экран кузова. `ChassisScreen` рама отправляет и отслеживает второй карточкой; возвращённый `Message` тоже отслеживается. При `None` и включённом языке рама сама даёт безопасную двуязычную карточку с toggle |
 | `on_locale_changed` | `None` | После ручной смены языка. `None` — рама обновляет только свои экраны |
 | `initial_locale_policy` | группа RU из плана | Базовые коды Telegram, которые дают `ru`; остальное → `en` |
 | `initial_locale_resolver` | `None` | Замена политики. `None` — штатный разбор `language_code` |
@@ -193,7 +193,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 ### 5.1 Кнопки
 
-Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку.
+Постоянный `ReplyKeyboardMarkup`: включённые служебные кнопки стоят в одном ряду, подпись Info — `ℹ️ Info/FAQ`. Старые подписи остаются входными алиасами. Приватные `/start`, `/help` и `/support` работают, но в синее меню не входят. Синее меню — канонический `/menu` («📱 Восстановить кнопки меню») плюс команды, которые кузов передал явно; переданные кузовом `menu`, `start`, `help`, `support` игнорируются. Один клик Info вызывает `render_info_callback` один раз и не добавляет вторую карточку. Без кузовного рендера рама показывает двуязычный Info; при включённом языке на нём есть toggle.
 Карточки: `UserScreenTracker`, `CardClosePolicy`.  
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.  
@@ -203,11 +203,12 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 
 Рама — единственный владелец `Command("start")`. Кузов удаляет свой обработчик и передаёт `render_start_callback`.
 
-1. Удалить кузовной `Command("start")`. Пока он стоит на `domain_router`, диспетчер отдаёт `/start` ему, и носитель рамы не отправляется.
+1. Удалить кузовной `Command("start")`. Если он остаётся на `domain_router`, фабрика останавливает сборку с `ValueError`, чтобы конфликт не ушёл в прод молча.
 2. Передать `render_start_callback(context)`. `context` содержит `message`, `user_id`, `bot` и `locale`.
 3. Не слать из callback второе приветствие с Reply-клавиатурой. Клавиатуру уже несёт сообщение рамы: `welcome_text` либо короткое «Главное меню».
-4. Проверить живой `/start`: ровно один носитель клавиатуры и ровно одна стартовая карточка callback. Третье сообщение или ответ старого обработчика значит, что миграция не закончена.
-5. «Назад» из поддержки позже вызывает тот же callback. Отдельный стартовый экран для возврата не писать.
+4. Вернуть из callback `ChassisScreen` (рама отправит, добавит toggle и запомнит его) либо уже отправленный `Message` (рама только запомнит; toggle тогда добавляет кузов). Иначе lifecycle карточки не сможет закрыть её автоматически.
+5. Проверить живой `/start`: ровно один носитель клавиатуры и ровно одна стартовая карточка callback. Третье сообщение значит, что миграция не закончена.
+6. «Назад» из поддержки позже вызывает тот же callback. Отдельный стартовый экран для возврата не писать.
 
 ### 5.2 Storage
 

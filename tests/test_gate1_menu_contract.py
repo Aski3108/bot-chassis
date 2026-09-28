@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.filters import Command
 from aiogram.methods import TelegramMethod
-from aiogram.types import Chat, Message, Update, User
+from aiogram.types import BotCommand, Chat, Message, Update, User
 
 from bot_chassis.commands import setup_bot_commands
 from bot_chassis.config import BotChassisConfig
@@ -84,10 +84,20 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_visible_commands_are_menu_plus_explicit_body_commands(self) -> None:
         bot = AsyncMock()
-        await setup_bot_commands(bot, custom_commands=None)
+        await setup_bot_commands(
+            bot,
+            custom_commands=[
+                BotCommand(command="menu", description="Подмена"),
+                BotCommand(command="start", description="Скрытая"),
+                BotCommand(command="help", description="Скрытая"),
+                BotCommand(command="support", description="Скрытая"),
+                BotCommand(command="detect", description="Проверить"),
+            ],
+        )
         commands = bot.set_my_commands.await_args.args[0]
         self.assertEqual([(item.command, item.description) for item in commands], [
             ("menu", "📱 Восстановить кнопки меню"),
+            ("detect", "Проверить"),
         ])
 
     async def test_info_click_sends_one_card_for_new_and_legacy_labels(self) -> None:
@@ -145,20 +155,12 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Главное меню", texts[0])
         self.assertIn("Используйте кнопки", texts[0])
 
-    async def test_leftover_body_start_does_not_add_chassis_reply(self) -> None:
+    async def test_leftover_body_start_is_rejected_during_assembly(self) -> None:
         domain = Router(name="domain")
-        body_hits = {"n": 0}
 
         @domain.message(Command("start"))
         async def body_start(message: Message) -> None:
-            body_hits["n"] += 1
             await message.answer("BODY START")
-
-        callback_hits = {"n": 0}
-
-        async def render_start(context) -> None:
-            callback_hits["n"] += 1
-            await context.message.answer("START CARD")
 
         config = BotChassisConfig(
             bot_id="bot_a",
@@ -166,16 +168,12 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
             enable_admin=False,
             enable_payments=False,
         )
-        chassis = await create_complete_chassis(
-            self.bot,
-            config,
-            domain_router=domain,
-            render_start_callback=render_start,
-        )
-        await chassis.dp.feed_update(self.bot, Update(update_id=1, message=_private_message(9, "/start")))
-        self.assertEqual(body_hits["n"], 1)
-        self.assertEqual(callback_hits["n"], 0)
-        self.assertEqual(_send_texts(self.session), ["BODY START"])
+        with self.assertRaisesRegex(ValueError, "единый /start принадлежит bot_chassis"):
+            await create_complete_chassis(
+                self.bot,
+                config,
+                domain_router=domain,
+            )
 
     async def test_unhandled_error_text_has_two_plain_lines(self) -> None:
         message = _private_message(3, "hi")

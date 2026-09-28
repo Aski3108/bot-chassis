@@ -12,6 +12,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from loguru import logger
 
+_RESERVED_COMMANDS = frozenset({"menu", "start", "help", "support"})
+
 
 async def setup_bot_commands(
     bot: Bot,
@@ -27,7 +29,10 @@ async def setup_bot_commands(
     commands_map = {c.command: c for c in default_commands}
     if custom_commands:
         for cmd in custom_commands:
-            commands_map[cmd.command] = cmd
+            command_name = cmd.command.lstrip("/").casefold()
+            if command_name in _RESERVED_COMMANDS:
+                continue
+            commands_map[command_name] = cmd
     commands = list(commands_map.values())
     try:
         await bot.set_my_commands(commands, scope=BotCommandScopeDefault())

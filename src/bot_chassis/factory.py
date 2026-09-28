@@ -38,6 +38,7 @@ from .support_bridge import SupportThreadStore
 
 _MENU_TEXT = "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:"
 _START_CARRIER_TEXT = "Главное меню"
+_DEFAULT_START_CARD_TEXT = "📱 <b>Главное меню / Main menu</b>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +97,11 @@ async def create_complete_chassis(
         storage = await create_storage(config)
     if dp is None:
         dp = Dispatcher()
+
+    if config.enable_buttons and domain_router is not None and _router_handles_start(domain_router):
+        raise ValueError(
+            "domain_router не должен регистрировать /start: единый /start принадлежит bot_chassis"
+        )
 
     locale_cache = register_chassis_middlewares(
         dp,
@@ -229,8 +235,22 @@ def _create_start_router(
         locale = locale_cache.get(user_id) or config.default_locale
         keyboard = build_main_menu_keyboard(domain_rows=domain_rows, locale=locale)
         if render_start_callback is None:
-            welcome = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
-            await message.answer(welcome, reply_markup=keyboard, parse_mode="HTML")
+            if not language_switch_enabled:
+                welcome = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
+                await message.answer(welcome, reply_markup=keyboard, parse_mode="HTML")
+                return
+            carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
+            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+            markup = decorate_info_markup(
+                None,
+                MarkupContext(locale=locale, user_id=user_id),
+            )
+            delivered = await message.answer(
+                _DEFAULT_START_CARD_TEXT,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
             return
         carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
         await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
@@ -242,11 +262,34 @@ def _create_start_router(
                 locale=locale,
             )
         )
+        if isinstance(rendered, Message):
+            screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
+            return
         if not isinstance(rendered, ChassisScreen):
             return
         markup = rendered.markup
         if language_switch_enabled:
             markup = decorate_info_markup(markup, MarkupContext(locale=locale, user_id=user_id))
-        await message.answer(rendered.text, reply_markup=markup, parse_mode=rendered.parse_mode)
+        delivered = await message.answer(
+            rendered.text,
+            reply_markup=markup,
+            parse_mode=rendered.parse_mode,
+        )
+        screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
 
     return router
+
+
+def _router_handles_start(router: Router) -> bool:
+    """Проверяет конфликт владения системной командой /start."""
+
+    for handler in router.message.handlers:
+        for filter_object in handler.filters:
+            command_filter = filter_object.callback
+            if not isinstance(command_filter, Command):
+                continue
+            for command in command_filter.commands:
+                command_name = getattr(command, "command", command)
+                if isinstance(command_name, str) and command_name.lstrip("/").casefold() == "start":
+                    return True
+    return False

@@ -387,6 +387,93 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
         labels = [button.text for row in info_sends[0].reply_markup.inline_keyboard for button in row]
         self.assertEqual(labels, ["Подробнее", "🌐 English / Русский"])
 
+    async def test_default_start_and_info_carry_toggle_without_body_renderers(self) -> None:
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+            enable_language_switch=True,
+        )
+        chassis = await create_complete_chassis(self.bot, config, project_label="Demo")
+        user = _user(21, "ru")
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=1,
+                message=Message(
+                    message_id=1,
+                    date=1,
+                    chat=Chat(id=21, type="private"),
+                    from_user=user,
+                    text="/start",
+                ),
+            ),
+        )
+        start_sends = _send_messages(self.session)
+        self.assertEqual(len(start_sends), 2)
+        self.assertEqual(
+            start_sends[1].reply_markup.inline_keyboard[0][0].callback_data,
+            "core_lang:toggle",
+        )
+
+        self.session.requests.clear()
+        await chassis.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=2,
+                message=Message(
+                    message_id=2,
+                    date=1,
+                    chat=Chat(id=21, type="private"),
+                    from_user=user,
+                    text="ℹ️ Info/FAQ",
+                ),
+            ),
+        )
+        info_sends = _send_messages(self.session)
+        self.assertEqual(len(info_sends), 1)
+        self.assertIn("Info/FAQ (Demo)", info_sends[0].text)
+        self.assertEqual(
+            info_sends[0].reply_markup.inline_keyboard[0][0].callback_data,
+            "core_lang:toggle",
+        )
+        deletes = [item for item in self.session.requests if item.__class__.__name__ == "DeleteMessage"]
+        self.assertEqual(len(deletes), 1)
+
+    async def test_repeated_start_closes_previous_start_card(self) -> None:
+        async def render_start(context):
+            return ChassisScreen(text="START")
+
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+        )
+        chassis = await create_complete_chassis(
+            self.bot,
+            config,
+            render_start_callback=render_start,
+        )
+        user = _user(22, "en")
+        for update_id in (1, 2):
+            await chassis.dp.feed_update(
+                self.bot,
+                Update(
+                    update_id=update_id,
+                    message=Message(
+                        message_id=update_id,
+                        date=1,
+                        chat=Chat(id=22, type="private"),
+                        from_user=user,
+                        text="/start",
+                    ),
+                ),
+            )
+        deletes = [item for item in self.session.requests if item.__class__.__name__ == "DeleteMessage"]
+        self.assertEqual(len(deletes), 1)
+
     async def test_old_info_message_is_not_mutated(self) -> None:
         sent = Message(
             message_id=50,

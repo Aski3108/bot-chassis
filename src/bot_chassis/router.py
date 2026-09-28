@@ -240,10 +240,17 @@ def create_button_chassis_router(
                             f"Экран не зафиксирован в UserScreenTracker и не закроется автоматически."
                         )
                 else:
-                    # Нейтральная карточка Info
+                    markup = None
+                    if language_switch_enabled:
+                        markup = decorate_info_markup(
+                            None,
+                            MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
+                        )
+                    # Нейтральная двуязычная карточка остаётся корректной после toggle.
                     sent = await message.answer(
-                        f"ℹ️ <b>О сервисе ({project_label})</b>\n\n"
-                        f"Информационный раздел проекта.",
+                        f"ℹ️ <b>Info/FAQ ({project_label})</b>\n\n"
+                        f"Информация о проекте / Project information.",
+                        reply_markup=markup,
                         parse_mode="HTML",
                     )
                     screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
