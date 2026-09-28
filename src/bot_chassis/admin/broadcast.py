@@ -178,6 +178,7 @@ async def _run_broadcast(bot, storage: Storage, config: BotChassisConfig, bot_id
                         user_id=user_id,
                         telegram_bot_id=bot.id,
                         outcome=outcome,
+                        bot=bot,
                     )
             if index + 1 < total and not session.cancel:
                 await asyncio.sleep(BROADCAST_INTERVAL)

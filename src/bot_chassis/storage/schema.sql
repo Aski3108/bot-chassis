@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS user_bot_statuses (
     last_seen_at TEXT NOT NULL,
     status_changed_at TEXT NOT NULL,
     last_error_code TEXT,
+    first_launch_notified_at TEXT,
     PRIMARY KEY (bot_id, user_id, telegram_bot_id),
     CHECK (status IN ('active', 'stopped', 'deleted')),
     FOREIGN KEY (bot_id, user_id) REFERENCES users(bot_id, user_id)

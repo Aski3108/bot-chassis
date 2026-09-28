@@ -118,6 +118,22 @@ class StorageEngine:
                     WHERE origin_bot_id = ''
                     """
                 )
+            if _table_exists(conn, "user_bot_statuses"):
+                lifecycle_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(user_bot_statuses)")
+                }
+                if "first_launch_notified_at" not in lifecycle_columns:
+                    conn.execute(
+                        "ALTER TABLE user_bot_statuses ADD COLUMN first_launch_notified_at TEXT"
+                    )
+                    # Промежуточный Gate 3 уже мог отправить first-launch по этим рядам.
+                    # Безопаснее не дублировать событие после докатки коррекции B2.
+                    conn.execute(
+                        """
+                        UPDATE user_bot_statuses
+                        SET first_launch_notified_at = first_seen_at
+                        """
+                    )
             conn.commit()
         except Exception:
             conn.rollback()

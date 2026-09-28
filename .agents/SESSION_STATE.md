@@ -109,8 +109,12 @@ Gate 1 и Gate 1A выполнены на `feat/chassis-0.3`; повторный
 а Reply сверяется с темой исходного сообщения. Повторный аудит Gate 2: PASS.
 Узкий контур: 58 passed; полный сьют: 137 passed; `git diff --check` чистый.
 Gate 3 выполнен. Статус Telegram хранится отдельно по каждому боту.
-Полный сьют после Gate 3: 145 passed. Следующий шаг — независимый аудит B2.
-Gate 4 не начат. Push не делался.
+Первый B2 нашёл потерю `my_chat_member` в throttling, поглощение first-launch
+active membership и отсутствие событий смены статуса. Все три дефекта
+исправлены: membership не throttled, first-launch имеет отдельный атомарный
+claim, реальные переходы lifecycle дают одно events-событие. Повторный B2:
+PASS. Узкий контур: 85 passed; полный сьют: 148 passed; `git diff --check`
+чистый. Gate 4 не начат. Push не делался.
 
 Промпты: `.agents/IMPLEMENTATION_0_3_PROMPT.md` (ровно один гейт) и
 `.agents/AUDIT_0_3_PROMPT.md` (read-only проверка). Независимый аудит обязателен

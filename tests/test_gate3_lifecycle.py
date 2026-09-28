@@ -28,6 +28,7 @@ from bot_chassis.admin.router import _dossier
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.middleware.user_activity import UserActivityMiddleware
+from bot_chassis.middleware.throttling import ThrottlingMiddleware
 from bot_chassis.storage import create_storage
 from bot_chassis.storage.engine import StorageEngine
 from bot_chassis.user_lifecycle import (
@@ -80,13 +81,64 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
             table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_bot_statuses'"
             ).fetchone()
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(user_bot_statuses)")
+            }
             user = connection.execute("SELECT language_code, is_banned FROM users WHERE user_id = 8").fetchone()
-            return table is not None, user["language_code"], user["is_banned"]
+            return table is not None, columns, user["language_code"], user["is_banned"]
 
-        present, language, banned = await engine.run(_read)
+        present, columns, language, banned = await engine.run(_read)
         self.assertTrue(present)
+        self.assertIn("first_launch_notified_at", columns)
         self.assertEqual(language, "ru")
         self.assertEqual(banned, 0)
+
+    async def test_intermediate_gate3_rows_are_backfilled_without_duplicate_launch(self) -> None:
+        path = os.path.join(self._tmp.name, "gate3.db")
+        conn = sqlite3.connect(path)
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                bot_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                language_code TEXT NOT NULL DEFAULT 'ru',
+                is_banned INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (bot_id, user_id)
+            );
+            CREATE TABLE user_bot_statuses (
+                bot_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                origin_bot_id TEXT NOT NULL,
+                telegram_bot_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                status_changed_at TEXT NOT NULL,
+                last_error_code TEXT,
+                PRIMARY KEY (bot_id, user_id, telegram_bot_id)
+            );
+            INSERT INTO users (bot_id, user_id) VALUES ('network', 8);
+            INSERT INTO user_bot_statuses VALUES (
+                'network', 8, 'bpd', 101, 'active',
+                '2026-09-28 10:00:00', '2026-09-28 10:00:00',
+                '2026-09-28 10:00:00', NULL
+            );
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        engine = StorageEngine(path)
+        await engine.initialize()
+        await engine.initialize()
+
+        def _read(connection):
+            return connection.execute(
+                "SELECT first_seen_at, first_launch_notified_at FROM user_bot_statuses"
+            ).fetchone()
+
+        row = await engine.run(_read)
+        self.assertEqual(row["first_launch_notified_at"], row["first_seen_at"])
 
     async def test_sanctions_stay_network_wide_and_status_stays_per_bot(self) -> None:
         await self.storage.users.upsert_user("network", 7, username="ann")
@@ -159,6 +211,7 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_membership_and_temporary_errors(self) -> None:
         await self.storage.users.upsert_user("network", 7)
         self.storage.bot_statuses.bind_process("bpd", 101)
+        bot = SimpleNamespace(id=101, send_message=AsyncMock())
         user = User(id=7, is_bot=False, first_name="N")
         kicked = ChatMemberUpdated(
             chat=Chat(id=7, type="private"),
@@ -167,7 +220,7 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
             old_chat_member=ChatMemberMember(user=user),
             new_chat_member=ChatMemberBanned(user=user, until_date=datetime.now(timezone.utc)),
         )
-        await apply_my_chat_member(self.storage, self.config, kicked)
+        await apply_my_chat_member(self.storage, self.config, kicked, bot=bot)
         self.assertEqual(
             (await self.storage.bot_statuses.list_for_user("network", 7))[0].status,
             "stopped",
@@ -180,11 +233,16 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
             old_chat_member=ChatMemberBanned(user=user, until_date=datetime.now(timezone.utc)),
             new_chat_member=ChatMemberMember(user=user),
         )
-        await apply_my_chat_member(self.storage, self.config, returned)
+        await apply_my_chat_member(self.storage, self.config, kicked, bot=bot)
+        self.assertEqual(bot.send_message.await_count, 1)
+
+        await apply_my_chat_member(self.storage, self.config, returned, bot=bot)
         self.assertEqual(
             (await self.storage.bot_statuses.list_for_user("network", 7))[0].status,
             "active",
         )
+        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertIn("возобновил", bot.send_message.await_args.args[1])
 
         method = SendMessage(chat_id=7, text="x")
         self.assertIsNone(classify_delivery_error(TelegramRetryAfter(method=method, message="flood", retry_after=1)))
@@ -204,6 +262,64 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
             (await self.storage.bot_statuses.list_for_user("network", 7))[0].status,
             "active",
         )
+
+    async def test_membership_before_start_does_not_consume_first_launch_event(self) -> None:
+        await self.storage.users.upsert_user("network", 12, username="first")
+        bot = SimpleNamespace(id=101, send_message=AsyncMock())
+        user = User(id=12, is_bot=False, first_name="N", username="first", language_code="en")
+        member = ChatMemberUpdated(
+            chat=Chat(id=12, type="private"),
+            from_user=user,
+            date=datetime.now(timezone.utc),
+            old_chat_member=ChatMemberBanned(user=user, until_date=datetime.now(timezone.utc)),
+            new_chat_member=ChatMemberMember(user=user),
+        )
+        await apply_my_chat_member(self.storage, self.config, member, bot=bot)
+        self.assertEqual(bot.send_message.await_count, 0)
+
+        middleware = UserActivityMiddleware("network", self.storage, self.config)
+        message = Message(
+            message_id=1,
+            date=1,
+            chat=Chat(id=12, type="private"),
+            from_user=user,
+            text="/start ref_first",
+        )
+        await middleware(
+            AsyncMock(return_value="ok"),
+            Update(update_id=1, message=message),
+            {"event_from_user": user, "bot": bot},
+        )
+        self.assertEqual(bot.send_message.await_count, 1)
+        self.assertIn("Новый пользователь", bot.send_message.await_args.args[1])
+
+    async def test_membership_update_bypasses_throttling(self) -> None:
+        middleware = ThrottlingMiddleware("network")
+        user = User(id=13, is_bot=False, first_name="N")
+        handled: list[int] = []
+
+        async def handler(event, data):
+            handled.append(event.update_id)
+
+        for update_id in range(1, 6):
+            await middleware(
+                handler,
+                Update(update_id=update_id),
+                {"event_from_user": user},
+            )
+        membership = ChatMemberUpdated(
+            chat=Chat(id=13, type="private"),
+            from_user=user,
+            date=datetime.now(timezone.utc),
+            old_chat_member=ChatMemberMember(user=user),
+            new_chat_member=ChatMemberBanned(user=user, until_date=datetime.now(timezone.utc)),
+        )
+        await middleware(
+            handler,
+            Update(update_id=6, my_chat_member=membership),
+            {"event_from_user": user},
+        )
+        self.assertEqual(handled, [1, 2, 3, 4, 5, 6])
 
     async def test_broadcast_keeps_unknown_and_records_block(self) -> None:
         await self.storage.users.upsert_user("network", 1)

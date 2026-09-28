@@ -81,7 +81,7 @@ async def main(bot: Bot) -> None:
 
 Эталон: [`examples/run_complete_chassis.py`](../examples/run_complete_chassis.py), переменные — [`examples/.env.example`](../examples/.env.example).
 
-Polling и webhook передают `my_chat_member` в `allowed_updates`. Без этого события блокировка бота не станет `stopped`, пока доставка сама не получит ошибку. Если кузов передал в фабрику свой список без `my_chat_member`, старт пишет предупреждение. Статус `active` / `stopped` / `deleted` хранится отдельно для каждого фактического бота. Бан и теневой бан остаются санкцией всей сети. Нет ряда — статус `unknown`. Первый запуск в этом боте один раз пишет событие в events-тему; повторный `/start` его не повторяет.
+Polling и webhook передают `my_chat_member` в `allowed_updates`. Это событие не ограничивается throttling, поэтому блокировка не теряется после серии быстрых апдейтов. Если кузов передал в фабрику свой список без `my_chat_member`, старт пишет предупреждение. Статус `active` / `stopped` / `deleted` хранится отдельно для каждого фактического бота. Бан и теневой бан остаются санкцией всей сети. Нет ряда — статус `unknown`. Первый подтверждённый запуск в этом боте один раз пишет событие в events-тему, даже если перед `/start` пришёл active `my_chat_member`; повторный `/start` его не повторяет. Реальные изменения lifecycle тоже дают одно events-событие, одинаковые повторные updates молчат.
 
 Только кнопки: `create_button_chassis_router` из `bot_chassis` и [`examples/run_example.py`](../examples/run_example.py). Этот пример не наращивать.
 

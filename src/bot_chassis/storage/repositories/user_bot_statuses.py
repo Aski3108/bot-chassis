@@ -20,6 +20,13 @@ class UserBotStatus:
     status: str
 
 
+@dataclass(frozen=True, slots=True)
+class StatusTransition:
+    created: bool
+    changed: bool
+    previous_status: str | None
+
+
 class UserBotStatusRepository:
     def __init__(self, engine: StorageEngine) -> None:
         self._engine = engine
@@ -41,6 +48,16 @@ class UserBotStatusRepository:
         telegram_bot_id: int,
     ) -> bool:
         """Подтверждает active. True — ряда ещё не было, это первый запуск в этом боте."""
+        transition = await self.set_active(bot_id, user_id, origin_bot_id, telegram_bot_id)
+        return transition.created
+
+    async def set_active(
+        self,
+        bot_id: str,
+        user_id: int,
+        origin_bot_id: str,
+        telegram_bot_id: int,
+    ) -> StatusTransition:
         return await self._upsert(bot_id, user_id, origin_bot_id, telegram_bot_id, "active", None)
 
     async def mark_stopped(
@@ -50,8 +67,11 @@ class UserBotStatusRepository:
         origin_bot_id: str,
         telegram_bot_id: int,
         error_code: str,
-    ) -> None:
-        await self._upsert(bot_id, user_id, origin_bot_id, telegram_bot_id, "stopped", error_code)
+    ) -> bool:
+        transition = await self._upsert(
+            bot_id, user_id, origin_bot_id, telegram_bot_id, "stopped", error_code
+        )
+        return transition.changed
 
     async def mark_deleted(
         self,
@@ -59,11 +79,19 @@ class UserBotStatusRepository:
         user_id: int,
         origin_bot_id: str,
         telegram_bot_id: int,
-    ) -> None:
+    ) -> bool:
         """deleted на всех уже известных ботах tenant и на боте, который увидел ошибку."""
 
-        def _op(conn) -> None:
+        def _op(conn) -> bool:
             now = utc_now()
+            changed = conn.execute(
+                """
+                SELECT 1 FROM user_bot_statuses
+                WHERE bot_id = ? AND user_id = ? AND status != 'deleted'
+                LIMIT 1
+                """,
+                (bot_id, user_id),
+            ).fetchone() is not None
             conn.execute(
                 """
                 UPDATE user_bot_statuses
@@ -71,11 +99,11 @@ class UserBotStatusRepository:
                     status_changed_at = ?,
                     last_seen_at = ?,
                     last_error_code = 'deactivated'
-                WHERE bot_id = ? AND user_id = ?
+                WHERE bot_id = ? AND user_id = ? AND status != 'deleted'
                 """,
                 (now, now, bot_id, user_id),
             )
-            _upsert_status(
+            transition = _upsert_status(
                 conn,
                 bot_id,
                 user_id,
@@ -84,6 +112,52 @@ class UserBotStatusRepository:
                 "deleted",
                 "deactivated",
                 now,
+            )
+            return changed or transition.changed
+
+        return await self._engine.run(_op)
+
+    async def claim_first_launch(
+        self,
+        bot_id: str,
+        user_id: int,
+        telegram_bot_id: int,
+    ) -> str | None:
+        """Атомарно резервирует единственное событие первого запуска."""
+
+        def _op(conn) -> str | None:
+            token = utc_now()
+            cursor = conn.execute(
+                """
+                UPDATE user_bot_statuses
+                SET first_launch_notified_at = ?
+                WHERE bot_id = ? AND user_id = ? AND telegram_bot_id = ?
+                  AND first_launch_notified_at IS NULL
+                """,
+                (token, bot_id, user_id, telegram_bot_id),
+            )
+            return token if cursor.rowcount == 1 else None
+
+        return await self._engine.run(_op)
+
+    async def release_first_launch_claim(
+        self,
+        bot_id: str,
+        user_id: int,
+        telegram_bot_id: int,
+        token: str,
+    ) -> None:
+        """Разрешает повтор события, если его отправка не состоялась."""
+
+        def _op(conn) -> None:
+            conn.execute(
+                """
+                UPDATE user_bot_statuses
+                SET first_launch_notified_at = NULL
+                WHERE bot_id = ? AND user_id = ? AND telegram_bot_id = ?
+                  AND first_launch_notified_at = ?
+                """,
+                (bot_id, user_id, telegram_bot_id, token),
             )
 
         await self._engine.run(_op)
@@ -145,8 +219,8 @@ class UserBotStatusRepository:
         telegram_bot_id: int,
         status: str,
         error_code: str | None,
-    ) -> bool:
-        def _op(conn) -> bool:
+    ) -> StatusTransition:
+        def _op(conn) -> StatusTransition:
             return _upsert_status(
                 conn,
                 bot_id,
@@ -170,7 +244,7 @@ def _upsert_status(
     status: str,
     error_code: str | None,
     now: str,
-) -> bool:
+) -> StatusTransition:
     row = conn.execute(
         """
         SELECT status FROM user_bot_statuses
@@ -188,7 +262,7 @@ def _upsert_status(
             """,
             (bot_id, user_id, origin_bot_id, telegram_bot_id, status, now, now, now, error_code),
         )
-        return True
+        return StatusTransition(created=True, changed=True, previous_status=None)
     if row["status"] == status:
         conn.execute(
             """
@@ -198,7 +272,7 @@ def _upsert_status(
             """,
             (now, origin_bot_id, bot_id, user_id, telegram_bot_id),
         )
-        return False
+        return StatusTransition(created=False, changed=False, previous_status=row["status"])
     conn.execute(
         """
         UPDATE user_bot_statuses
@@ -207,4 +281,4 @@ def _upsert_status(
         """,
         (status, origin_bot_id, now, now, error_code, bot_id, user_id, telegram_bot_id),
     )
-    return False
+    return StatusTransition(created=False, changed=True, previous_status=row["status"])

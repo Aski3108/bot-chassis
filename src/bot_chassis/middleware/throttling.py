@@ -29,7 +29,9 @@ class ThrottlingMiddleware(BaseMiddleware):
     ) -> Any:
         if not self._enabled:
             return await handler(event, data)
-        if isinstance(event, Update) and _is_payment_update(event):
+        if isinstance(event, Update) and (
+            event.my_chat_member is not None or _is_payment_update(event)
+        ):
             return await handler(event, data)
 
         user = data.get("event_from_user")
