@@ -10,7 +10,7 @@
 | Поле | Значение |
 |---|---|
 | Tag | не ставился; только по отдельной команде |
-| Branch | `feat/chassis-0.3` |
+| Branch | `feat/chassis-0.3` = `7fe5d93` |
 | Previous stable | `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112` |
 | Profiling hold | tag `profiling` = `6823f30` (не двигался) |
 | Why | Операционный контур 0.3: меню, темы, lifecycle, админка, Excel snapshot, backup, stale-claim, отчёты, process control, канон env. Gate 13 пропущен. |

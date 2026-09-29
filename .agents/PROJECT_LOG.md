@@ -15,6 +15,7 @@
 SQLite snapshot вне `BEGIN IMMEDIATE`; stale nightly claim с fencing
 владельца. Control plane: Gate 13 пропущен, очередь и канон 0.3.0 без
 переименования. Tag `v0.3.0` не ставился. Tag `profiling` не двигался.
+Коммит: `7fe5d93`. Push: `origin/feat/chassis-0.3`.
 
 **Проверка.** Gate 6–8: **20 passed**. Полный `pytest tests -q`: **218 passed**.
 Frozen `tests/test_chassis.py`: **19 passed**. `compileall` и

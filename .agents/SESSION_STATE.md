@@ -3,7 +3,7 @@
 **Дата:** 2026-09-29
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `feat/chassis-0.3`
-**HEAD:** `feat/chassis-0.3` (Gate 6–12 + Low B4; SHA после коммита этого среза)
+**HEAD:** `7fe5d93` `feat: land chassis 0.3.0 operational contour without rename`
 **Рабочая ветка 0.3:** `feat/chassis-0.3`
 **Версия:** `0.3.0` на ветке (тег не ставился); предыдущий стабильный `0.2.2`
 **Profiling hold:** tag `profiling` = `6823f30`
