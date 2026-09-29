@@ -7,6 +7,8 @@ from aiogram.types import TelegramObject
 
 from ..storage.repositories.roles import RolesRepository
 
+SUPERADMIN_ONLY = "Только для суперадмина"
+
 
 class AdminRoleFilter(Filter):
     """Пропускает admin и superadmin этого bot_id."""

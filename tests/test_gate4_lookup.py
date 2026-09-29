@@ -172,7 +172,12 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         pending.set(14, PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE, origin_chat_id=14))
 
         await self._callback(14, CB_FIND, 1)
-        self.assertIn(FIND_PROMPT, self._texts(14))
+        combined = self._texts(14) + [
+            item.text
+            for item in self.session.requests
+            if item.__class__.__name__ == "EditMessageText"
+        ]
+        self.assertTrue(any(FIND_PROMPT in (text or "") for text in combined))
         self.assertTrue(admin_lookup_is_waiting("bot_a", 14))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
 
@@ -201,9 +206,9 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
         cancel_admin_lookup("bot_b", 14)
 
-        await self._callback(14, CB_BROADCAST, 10)
-        self.assertTrue(is_awaiting_broadcast_text("bot_a", 14))
-        self.assertFalse(is_awaiting_broadcast_text("bot_b", 14))
+        await self._callback(100, CB_BROADCAST, 10)
+        self.assertTrue(is_awaiting_broadcast_text("bot_a", 100))
+        self.assertFalse(is_awaiting_broadcast_text("bot_b", 100))
 
         config_b = BotChassisConfig(
             bot_id="bot_b",
@@ -230,5 +235,10 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
             ),
         )
         self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
-        self.assertTrue(is_awaiting_broadcast_text("bot_a", 14))
-        self.assertIn(FIND_PROMPT, self._texts(14))
+        self.assertTrue(is_awaiting_broadcast_text("bot_a", 100))
+        combined = self._texts(14) + [
+            item.text
+            for item in self.session.requests
+            if item.__class__.__name__ == "EditMessageText"
+        ]
+        self.assertTrue(any(FIND_PROMPT in (text or "") for text in combined))

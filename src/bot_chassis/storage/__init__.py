@@ -8,12 +8,14 @@ from ..config import BotChassisConfig
 
 from .engine import StorageEngine, utc_now
 from .repositories.bot_settings import BotSettingsRepository
+from .repositories.chassis_events import ChassisEventsRepository
 from .repositories.referrals import ReferralsRepository
 from .repositories.reviews import ReviewRecord, ReviewSubmissionsRepository
 from .repositories.roles import RolesRepository
 from .repositories.subscriptions import SubscriptionsRepository
 from .repositories.support_threads import SupportThreadsRepository
 from .repositories.transactions import TransactionsRepository, VoucherRecord
+from .repositories.scheduled_jobs import ScheduledJobRunsRepository
 from .repositories.user_bot_statuses import UserBotStatusRepository
 from .repositories.users import UserRecord, UsersRepository
 
@@ -30,6 +32,8 @@ class Storage:
     bot_settings: BotSettingsRepository
     referrals: ReferralsRepository
     bot_statuses: UserBotStatusRepository
+    scheduled_jobs: ScheduledJobRunsRepository
+    events: ChassisEventsRepository
 
 
 async def create_storage(config: BotChassisConfig) -> Storage:
@@ -49,6 +53,8 @@ async def create_storage(config: BotChassisConfig) -> Storage:
         bot_settings=BotSettingsRepository(engine),
         referrals=ReferralsRepository(engine, users),
         bot_statuses=bot_statuses,
+        scheduled_jobs=ScheduledJobRunsRepository(engine),
+        events=ChassisEventsRepository(engine),
     )
     await roles.seed_superadmins(config.bot_id, config.superadmin_ids)
     return storage

@@ -43,13 +43,19 @@ class _Body:
 
 def build_config(environ: Mapping[str, str]) -> BotChassisConfig:
     superadmins = _ids(environ.get("CHASSIS_SUPERADMIN_IDS") or environ.get("ADMIN_IDS"))
+    origin = (environ.get("CHASSIS_ORIGIN_BOT_ID") or "").strip() or None
     return BotChassisConfig(
         bot_id=environ.get("CHASSIS_BOT_ID", "demo").strip() or "demo",
         db_path=environ.get("CHASSIS_DB_PATH", "bot_chassis.db").strip() or "bot_chassis.db",
         superadmin_ids=superadmins,
         skus=(SkuItem(sku_code="demo", title="Демо", description="Пробный товар", stars_price=1),),
         support_chat_id=_int_or_none(environ.get("SUPPORT_CHAT_ID")),
-        audit_chat_id=_int_or_none(environ.get("CHASSIS_AUDIT_CHAT_ID") or environ.get("AUDIT_CHAT_ID")),
+        audit_chat_id=_int_or_none(environ.get("AUDIT_CHAT_ID") or environ.get("CHASSIS_AUDIT_CHAT_ID")),
+        origin_bot_id=origin,
+        support_thread_id=_int_or_none(environ.get("SUPPORT_THREAD_ID")),
+        audit_thread_id=_int_or_none(environ.get("AUDIT_THREAD_ID")),
+        ops_thread_id=_int_or_none(environ.get("OPS_THREAD_ID")),
+        events_thread_id=_int_or_none(environ.get("EVENTS_THREAD_ID")),
         enable_language_switch=_flag(environ.get("CHASSIS_ENABLE_LANGUAGE_SWITCH")),
         enable_referrals=_flag(environ.get("CHASSIS_ENABLE_REFERRALS")),
     )

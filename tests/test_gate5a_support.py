@@ -17,7 +17,7 @@ from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.admin.router import CB_FIND
 from bot_chassis.contracts import BTN_SUPPORT_RU
 from bot_chassis.factory import create_complete_chassis
-from bot_chassis.followup import PendingInputKind, PendingScope
+from bot_chassis.followup import PendingInput, PendingInputKind, PendingScope
 from bot_chassis.localization import ChassisScreen
 
 
@@ -247,3 +247,19 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
             ["buy_sku:d50", "buy_sku:d100", "buy_sku:d500"],
         )
         self.assertNotIn("buy_sku:donate_1", donate_cb)
+
+        self.session.requests.clear()
+        await self._callback(chassis, 7, "buy_sku:d50", 5)
+        invoices = [
+            request
+            for request in self.session.requests
+            if request.__class__.__name__ == "SendInvoice"
+        ]
+        self.assertEqual(len(invoices), 1)
+        self.assertEqual(invoices[0].prices[0].amount, 50)
+
+    def test_pending_input_keeps_old_positional_created_at(self) -> None:
+        stamp = 123.5
+        pending = PendingInput(PendingInputKind.SUPPORT_MESSAGE, None, None, None, stamp)
+        self.assertEqual(pending.created_at, stamp)
+        self.assertIsNone(pending.ticket_id)

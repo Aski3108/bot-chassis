@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bot-chassis"
-version = "0.2.2"
+version = "0.3.0"
 description = "Universal portable Telegram bot chassis based on aiogram v3"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,7 @@ authors = [{ name = "Aski3108" }]
 dependencies = [
     "aiogram>=3.13.0",
     "loguru>=0.7.0",
+    "openpyxl>=3.1.0,<4",
 ]
 
 [project.optional-dependencies]

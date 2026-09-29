@@ -5,6 +5,21 @@
 
 ---
 
+## v0.3.0 — 2026-09-29 (на `feat/chassis-0.3`, тег не ставился)
+
+| Поле | Значение |
+|---|---|
+| Tag | не ставился; только по отдельной команде |
+| Branch | `feat/chassis-0.3` |
+| Previous stable | `v0.2.2` = `d3c5de860428f4210d1fe4eb1fc84afe89eee112` |
+| Profiling hold | tag `profiling` = `6823f30` (не двигался) |
+| Why | Операционный контур 0.3: меню, темы, lifecycle, админка, Excel snapshot, backup, stale-claim, отчёты, process control, канон env. Gate 13 пропущен. |
+| Touched | фабрика keyword-only `None`, schema 0.3, `docs/CHASSIS.md`, `CHANGELOG` 0.3.0, `pyproject` 0.3.0, `tests/test_gate12_release.py` |
+| Consumers | Profiling не переключать; монтаж PsyBot / Listener — в их репозиториях, не из этой рамы |
+| Push | ветка `feat/chassis-0.3` — по команде владельца 2026-09-29 |
+
+---
+
 ## v0.2.2 — 2026-09-27
 
 | Поле | Значение |

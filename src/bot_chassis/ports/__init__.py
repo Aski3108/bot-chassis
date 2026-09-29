@@ -7,7 +7,7 @@ from .cabinet import (
     DefaultCabinetSlotsAdapter,
     build_cabinet_renderer,
 )
-from .donations import DonationCatalogPort, resolve_donation_items
+from .donations import DonationCatalogPort, merge_payment_skus, resolve_donation_items
 from .reviews import ReviewPublishResult, ReviewSinkPort, TelegramReviewSink
 from .payments import (
     DefaultVoucherManagerAdapter,
@@ -15,6 +15,7 @@ from .payments import (
     SkuVoucherConsumerPort,
     VoucherManagerPort,
 )
+from .process_control import ProcessControlPort, ProcessOperationResult, ProcessTarget
 from .referrals import DefaultReferralAdapter, ReferralPort
 from .work_gate import DefaultWorkGateAdapter, WorkGatePort
 
@@ -28,6 +29,9 @@ __all__ = [
     "DefaultVoucherManagerAdapter",
     "DefaultWorkGateAdapter",
     "DonationCatalogPort",
+    "ProcessControlPort",
+    "ProcessOperationResult",
+    "ProcessTarget",
     "ReferralPort",
     "ReviewPublishResult",
     "ReviewSinkPort",
@@ -37,5 +41,6 @@ __all__ = [
     "VoucherManagerPort",
     "WorkGatePort",
     "build_cabinet_renderer",
+    "merge_payment_skus",
     "resolve_donation_items",
 ]

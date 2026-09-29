@@ -49,9 +49,24 @@ def create_payments_router(
     async def handle_pre_checkout(query: PreCheckoutQuery) -> None:
         try:
             ok, error = await _pre_checkout_decision(storage, bot_id, query, config)
+            if not ok:
+                await _record_payment_error(
+                    storage,
+                    bot_id,
+                    config,
+                    query.bot,
+                    _payment_error_code(error),
+                )
             await query.answer(ok=ok, error_message=error)
-        except Exception:
+        except Exception as exc:
             logger.exception("Не удалось ответить на pre_checkout")
+            await _record_payment_error(
+                storage,
+                bot_id,
+                config,
+                query.bot,
+                f"internal:{type(exc).__name__}",
+            )
             try:
                 await query.answer(ok=False, error_message=PRE_CHECKOUT_INTERNAL_ERROR)
             except Exception:
@@ -68,6 +83,13 @@ def create_payments_router(
             payer = message.from_user
             if payer is None:
                 logger.error("successful_payment без пользователя и с битым payload")
+                await _record_payment_error(
+                    storage,
+                    bot_id,
+                    config,
+                    message.bot,
+                    "invalid_success_payload:no_user",
+                )
                 await _notify_support(
                     message.bot,
                     config,
@@ -97,6 +119,13 @@ def create_payments_router(
         if not created:
             return
         if invalid:
+            await _record_payment_error(
+                storage,
+                bot_id,
+                config,
+                message.bot,
+                "invalid_success_payload",
+            )
             await _notify_support(
                 message.bot,
                 config,
@@ -149,6 +178,35 @@ def _parse_payload(payload: str) -> tuple[str, int] | None:
     if kind != "sku" or not sku_code or not nonce or not user_raw.isdigit():
         return None
     return sku_code, int(user_raw)
+
+
+def _payment_error_code(error: str | None) -> str:
+    if error == SHADOW_PAYMENT_ERROR:
+        return "shadow_banned"
+    if error == PAYLOAD_MISMATCH_ERROR:
+        return "payload_mismatch"
+    if error == MAINTENANCE_PAYMENT_ERROR:
+        return "maintenance"
+    return "rejected"
+
+
+async def _record_payment_error(
+    storage: Storage,
+    bot_id: str,
+    config: BotChassisConfig,
+    bot,
+    details: str,
+) -> None:
+    try:
+        await storage.events.record(
+            bot_id,
+            "payment_error",
+            origin_bot_id=resolved_origin(config),
+            telegram_bot_id=int(bot.id) if bot is not None else 0,
+            details=details,
+        )
+    except Exception:
+        logger.exception("Не удалось записать ошибку платежа")
 
 
 def _voucher(record: VoucherRecord) -> SkuVoucher:

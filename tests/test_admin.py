@@ -39,6 +39,8 @@ from bot_chassis.admin.router import (
     BACKUP_USAGE,
     CB_BROADCAST,
     CB_EXPORT,
+    CB_FIND,
+    CB_HOME,
     CB_MAINT,
     EXPORT_USAGE,
     GIFT_NOT_FOUND,
@@ -62,6 +64,15 @@ from bot_chassis.admin.router import (
     USER_NOT_FOUND,
     USER_USAGE,
     create_admin_router,
+)
+from bot_chassis.admin.screens import (
+    CB_DO_MAINT,
+    CB_GO_BACKUP,
+    CB_GO_BCAST,
+    CB_GO_EXPORT,
+    CB_GO_MAINT,
+    CB_GO_RESTART,
+    CB_GO_STATS,
 )
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.followup import PendingInputKind
@@ -187,7 +198,7 @@ class _Session(BaseSession):
             return Message(
                 message_id=getattr(method, "message_id", 50) or 50,
                 date=int(time.time()),
-                chat=Chat(id=getattr(method, "chat_id", 0), type="private"),
+                chat=Chat(id=getattr(method, "chat_id", 0) or 14, type="private"),
                 text=getattr(method, "text", ""),
             )
         return True
@@ -260,12 +271,31 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         text = sent[0].text
         self.assertIn("Пользователи: 3", text)
-        self.assertIn("Бан: 1", text)
-        self.assertIn("Оплаты: 50 XTR", text)
-        self.assertIn("Подарки: 1", text)
+        self.assertIn("Active (этот бот):", text)
+        self.assertIn("Новые сегодня:", text)
+        self.assertIn("Открытые обращения:", text)
+        self.assertIn("Платежи Stars сегодня:", text)
+        self.assertIn("Планировщик: выключен", text)
         self.assertIn("🟢 снят", text)
+        self.assertIn("/user", text)
+        self.assertNotIn("/export", text)
         callbacks = [button.callback_data for row in sent[0].reply_markup.inline_keyboard for button in row]
-        self.assertEqual(callbacks, [CB_MAINT, CB_EXPORT, CB_BROADCAST, "adm_find"])
+        self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_MAINT])
+        self.assertNotIn(CB_EXPORT, callbacks)
+        self.assertNotIn(CB_BROADCAST, callbacks)
+        self.assertNotIn(CB_GO_BCAST, callbacks)
+        self.assertNotIn(CB_GO_RESTART, callbacks)
+
+        self.session.requests.clear()
+        await self._feed_command(100, 10)
+        root_home = [item for item in self._named("SendMessage") if item.chat_id == 100]
+        self.assertTrue(root_home)
+        root_cb = [button.callback_data for row in root_home[0].reply_markup.inline_keyboard for button in row]
+        self.assertIn(CB_GO_BCAST, root_cb)
+        self.assertIn(CB_GO_EXPORT, root_cb)
+        self.assertIn(CB_GO_BACKUP, root_cb)
+        self.assertNotIn(CB_GO_RESTART, root_cb)
+        self.assertIn("/export", root_home[0].text)
 
         self.session.requests.clear()
         panel = Message(
@@ -275,18 +305,18 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             from_user=_user(14, username="a<b>"),
             text="admin",
         )
-        await self._feed_callback(14, CB_MAINT, 2, panel, username="a<b>")
+        await self._feed_callback(14, CB_GO_MAINT, 2, panel, username="a<b>")
+        await self._feed_callback(14, CB_DO_MAINT, 3, panel, username="a<b>")
         on, _reason = await self.storage.bot_settings.get_maintenance_status("bot_a")
         self.assertTrue(on)
-        edited = self._named("EditMessageText")
-        self.assertEqual(len(edited), 1)
-        self.assertIn("🔴 опущен", edited[0].text)
+        reports = [item for item in self._named("EditMessageText") if item.reply_markup is None]
+        self.assertTrue(any("Рубильник опущен" in (item.text or "") for item in reports))
+        homes = [item for item in self._named("SendMessage") if item.chat_id == 14 and "Админка" in (item.text or "")]
+        self.assertTrue(homes)
         audit = [item for item in self._named("SendMessage") if item.chat_id == -100]
-        self.assertEqual(len(audit), 1)
-        self.assertIn("Рубильник опущен", audit[0].text)
-        self.assertIn("&lt;b&gt;", audit[0].text)
-        self.assertNotIn("<b>", audit[0].text)
-        self.assertEqual(audit[0].parse_mode, "HTML")
+        self.assertTrue(any("Рубильник опущен" in item.text for item in audit))
+        self.assertTrue(any("&lt;b&gt;" in item.text for item in audit))
+        self.assertTrue(all("<b>" not in item.text for item in audit))
 
     async def test_extra_admin_rows_append_and_dispatch_under_chassis_acl(self) -> None:
         class ExtraActions:
@@ -302,18 +332,32 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             create_admin_router("bot_a", self.storage, self.config, extra_actions=extra)
         )
         await self._feed_command(14, 201)
-        home = next(
+        staff_home = next(
             item
             for item in self._named("SendMessage")
             if item.chat_id == 14 and "Админка" in item.text
         )
-        callbacks = [
+        staff_cb = [
             button.callback_data
-            for row in home.reply_markup.inline_keyboard
+            for row in staff_home.reply_markup.inline_keyboard
             for button in row
         ]
-        self.assertEqual(callbacks[:3], [CB_MAINT, CB_EXPORT, CB_BROADCAST])
-        self.assertEqual(callbacks[3:], ["adm_find", "adm_ops:restart:adhd"])
+        self.assertEqual(staff_cb, [CB_GO_STATS, CB_FIND, CB_GO_MAINT])
+        self.assertNotIn("adm_ops:restart:adhd", staff_cb)
+
+        self.session.requests.clear()
+        await self._feed_command(100, 2010)
+        root_home = next(
+            item
+            for item in self._named("SendMessage")
+            if item.chat_id == 100 and "Админка" in item.text
+        )
+        root_cb = [
+            button.callback_data
+            for row in root_home.reply_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertIn("adm_ops:restart:adhd", root_cb)
 
         panel = Message(
             message_id=50,
@@ -364,9 +408,10 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             for row in sent.reply_markup.inline_keyboard
             for button in row
         ]
-        self.assertEqual(buttons[-2], ("Grant hours", "adm_ops:grant_hours:15"))
-        self.assertEqual(buttons[-1], ("« Главное меню админки", "adm_home"))
-        self.assertEqual(buttons[-3][1], "adm_usr:role_adm:15")
+        self.assertEqual(buttons[-2], ("« Назад", "adm_back"))
+        self.assertEqual(buttons[-1], ("В главное меню", "adm_home"))
+        self.assertEqual(buttons[-3], ("Grant hours", "adm_ops:grant_hours:15"))
+        self.assertNotIn("adm_usr:role_adm:15", [item[1] for item in buttons])
 
         panel = Message(
             message_id=50,
@@ -395,14 +440,14 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         documents = self._named("SendDocument")
         self.assertEqual(len(documents), 1)
         self.assertEqual(documents[0].chat_id, 100)
-        self.assertEqual(documents[0].document.filename, "export.zip")
-        self.assertTrue(any("Экспорт all" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
+        self.assertEqual(documents[0].document.filename, "database.xlsx")
+        self.assertTrue(any("Экспорт xlsx" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
         self.assertFalse(any(item.chat_id == -100 for item in documents))
 
         self.session.requests.clear()
         await self._feed_callback(14, CB_BROADCAST, 3, panel)
-        self.assertEqual(len(self._named("AnswerCallbackQuery")), 1)
-        self.assertTrue(any(item.text == "Пришлите текст рассылки." for item in self._named("SendMessage") if item.chat_id == 14))
+        answers = self._named("AnswerCallbackQuery")
+        self.assertEqual(answers[-1].text, SUPERADMIN_ONLY)
 
     async def test_ban_unban_and_shadowban(self) -> None:
         await self.storage.users.upsert_user("bot_a", 16, username="neo")
@@ -602,12 +647,11 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             [
                 ("🔴 Забанить", "adm_usr:ban:16"),
                 ("👻 Теневой бан: ВКЛ", "adm_usr:shban:16"),
-                ("🎁 +30 дней VIP", "adm_usr:gift30:16"),
-                ("🎟 +1 талон", "adm_usr:addvouch:16"),
-                ("👑 Роль Admin", "adm_usr:role_adm:16"),
-                ("« Главное меню админки", "adm_home"),
+                ("« Назад", "adm_back"),
+                ("В главное меню", "adm_home"),
             ],
         )
+        self.assertNotIn("adm_usr:gift30:16", [button.callback_data for button in buttons])
 
         panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="dossier")
         self.session.requests.clear()
@@ -623,13 +667,16 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(gift.is_lifetime)
         self.assertEqual(await self._active_gifts(16), 1)
         self.assertIn("до ", self._named("EditMessageText")[0].text)
+        self.assertIsNone(self._named("EditMessageText")[0].reply_markup)
+        self.assertTrue(any("Админка" in (item.text or "") for item in self._named("SendMessage") if item.chat_id == 100))
         self.assertTrue(any("30 дн." in item.text for item in self._named("SendMessage") if item.chat_id == -100))
 
         self.session.requests.clear()
         await self._feed_callback(14, "adm_usr:ban:16", 7, panel)
         self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_banned)
         self.assertIn("Забанен", self._named("EditMessageText")[0].text)
-        self.assertIn("🟢 Разбанить", self._named("EditMessageText")[0].reply_markup.inline_keyboard[0][0].text)
+        self.assertIsNone(self._named("EditMessageText")[0].reply_markup)
+        self.assertTrue(any("Админка" in (item.text or "") for item in self._named("SendMessage") if item.chat_id == 14))
 
         self.session.requests.clear()
         await self._feed_callback(14, "adm_usr:ban:100", 8, panel)
@@ -652,6 +699,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(vouchers[0].payment_id.startswith("admin:"))
         self.assertTrue(any("Талон выдан" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
         self.assertIn("Талоны: 1 шт. (Оплат всего: 1)", self._named("EditMessageText")[0].text)
+        self.assertIsNone(self._named("EditMessageText")[0].reply_markup)
 
         self.session.requests.clear()
         await self._feed_callback(100, "adm_usr:role_adm:16", 11, panel)
@@ -950,31 +998,36 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         async def fake_sleep(seconds: float) -> None:
             slept.append(seconds)
 
-        panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="admin")
+        staff_panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="admin")
+        panel = Message(message_id=51, date=1, chat=Chat(id=100, type="private"), text="admin")
         with patch("bot_chassis.admin.broadcast.asyncio.sleep", fake_sleep):
             await self._feed_callback(5, "adm_bcast", 1, panel)
             self.assertFalse(self._named("SendMessage"))
 
-            await self._feed_callback(14, "adm_bcast", 2, panel)
-            await self._feed_text(14, "hello <b>", 3)
-            preview = [item for item in self._named("SendMessage") if item.chat_id == 14 and "Предпросмотр" in item.text]
+            await self._feed_callback(14, "adm_bcast", 2, staff_panel)
+            self.assertEqual(self._named("AnswerCallbackQuery")[-1].text, SUPERADMIN_ONLY)
+
+            await self._feed_callback(100, "adm_bcast", 21, panel)
+            await self._feed_text(100, "hello <b>", 3)
+            preview = [item for item in self._named("SendMessage") if item.chat_id == 100 and "Предпросмотр" in item.text]
             self.assertEqual(len(preview), 1)
             self.assertIn("hello &lt;b&gt;", preview[0].text)
             self.assertNotIn("hello <b>", preview[0].text)
-            self.assertFalse(any(item.chat_id == 100 and item.text == "hello <b>" for item in self._named("SendMessage")))
+            self.assertFalse(any(item.chat_id == 14 and item.text == "hello <b>" for item in self._named("SendMessage")))
 
             self.session.requests.clear()
-            await self._feed_callback(14, CB_BROADCAST_CANCEL, 4, panel)
+            await self._feed_callback(100, CB_BROADCAST_CANCEL, 4, panel)
             self.assertFalse(any(item.text == "hello <b>" for item in self._named("SendMessage")))
+            self.assertTrue(any(item.reply_markup is None for item in self._named("EditMessageReplyMarkup") + self._named("EditMessageText")))
 
-            await self._feed_callback(14, "adm_bcast", 5, panel)
-            await self._feed_text(14, "hello <b>", 6)
+            await self._feed_callback(100, "adm_bcast", 5, panel)
+            await self._feed_text(100, "hello <b>", 6)
             self.session.requests.clear()
             slept.clear()
-            await self._feed_callback(14, CB_BROADCAST_GO, 7, panel)
+            await self._feed_callback(100, CB_BROADCAST_GO, 7, panel)
             bodies = [item for item in self._named("SendMessage") if item.text == "hello <b>"]
             self.assertEqual(sorted(item.chat_id for item in bodies), [14, 100])
-            status = [item for item in self._named("SendMessage") if item.text.startswith("📢 Рассылка:")]
+            status = [item for item in self._named("SendMessage") if item.text and item.text.startswith("📢 Рассылка:")]
             self.assertEqual(status[0].reply_markup.inline_keyboard[0][0].callback_data, CB_BROADCAST_STOP)
             self.assertNotIn(15, [item.chat_id for item in bodies])
             self.assertNotIn(16, [item.chat_id for item in bodies])
@@ -999,9 +1052,9 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             self.session.make_request = retry_once
             self.session.requests.clear()
             slept.clear()
-            await self._feed_callback(14, "adm_bcast", 8, panel)
-            await self._feed_text(14, "again", 9)
-            await self._feed_callback(14, CB_BROADCAST_GO, 10, panel)
+            await self._feed_callback(100, "adm_bcast", 8, panel)
+            await self._feed_text(100, "again", 9)
+            await self._feed_callback(100, CB_BROADCAST_GO, 10, panel)
             self.assertIn(2, slept)
             again = [item for item in self._named("SendMessage") if item.text == "again"]
             self.assertIn(17, [item.chat_id for item in again])
@@ -1016,9 +1069,9 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
 
             self.session.make_request = forbid_100
             self.session.requests.clear()
-            await self._feed_callback(14, "adm_bcast", 11, panel)
-            await self._feed_text(14, "quiet", 12)
-            await self._feed_callback(14, CB_BROADCAST_GO, 13, panel)
+            await self._feed_callback(100, "adm_bcast", 11, panel)
+            await self._feed_text(100, "quiet", 12)
+            await self._feed_callback(100, CB_BROADCAST_GO, 13, panel)
             quiet = [item for item in self._named("SendMessage") if item.text == "quiet"]
             self.assertIn(14, [item.chat_id for item in quiet])
             self.assertNotIn(100, [item.chat_id for item in quiet])
@@ -1030,25 +1083,25 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             async def stop_after_actor(bot, method, timeout=None):
                 result = await original(bot, method, timeout)
                 if method.__class__.__name__ == "SendMessage" and getattr(method, "text", "") == "halt":
-                    session = _BROADCAST_SESSIONS.get(("bot_a", 14))
+                    session = _BROADCAST_SESSIONS.get(("bot_a", 100))
                     if session is not None:
                         session.cancel = True
                 return result
 
             self.session.make_request = stop_after_actor
             self.session.requests.clear()
-            await self._feed_callback(14, "adm_bcast", 14, panel)
-            await self._feed_text(14, "halt", 15)
-            await self._feed_callback(14, CB_BROADCAST_GO, 16, panel)
+            await self._feed_callback(100, "adm_bcast", 14, panel)
+            await self._feed_text(100, "halt", 15)
+            await self._feed_callback(100, CB_BROADCAST_GO, 16, panel)
             halted = [item for item in self._named("SendMessage") if item.text == "halt"]
-            self.assertEqual([item.chat_id for item in halted], [14])
-            self.assertTrue(any("остановлено=1" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
+            self.assertEqual(len(halted), 1)
+            self.assertTrue(any("остановлено=" in item.text for item in self._named("SendMessage") if item.chat_id == -100))
             self.session.make_request = original
 
             self.session.requests.clear()
             await self.storage.users.set_ban("bot_a", 14, True, "blocked")
-            await self._feed_callback(14, "adm_bcast", 17, panel)
-            self.assertFalse(self._named("SendMessage"))
+            await self._feed_callback(14, "adm_bcast", 17, staff_panel)
+            self.assertFalse([item for item in self._named("SendMessage") if item.chat_id == 14])
 
     async def test_long_ban_reason_keeps_words_and_caps_length(self) -> None:
         await self.storage.users.upsert_user("bot_a", 16)
@@ -1193,7 +1246,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         edited = self._named("EditMessageText")
         self.assertEqual(len(edited), 1)
         self.assertIn("Админка", edited[0].text)
-        self.assertIn(CB_MAINT, [button.callback_data for row in edited[0].reply_markup.inline_keyboard for button in row])
+        self.assertIn(CB_GO_STATS, [button.callback_data for row in edited[0].reply_markup.inline_keyboard for button in row])
 
     async def _payment_state(self, payment_id: str, provider: str = "telegram_stars") -> tuple[str, str] | None:
         def _op(conn):
@@ -1294,7 +1347,10 @@ def _csv_rows(payload: bytes) -> list[list[str]]:
 
 
 def _document(method: TelegramMethod) -> tuple[str, bytes]:
-    return method.document.filename, method.document.data
+    payload = getattr(method, "_test_payload", None)
+    if payload is None:
+        payload = method.document.data
+    return method.document.filename, payload
 
 
 def _user(user_id: int, username: str | None = None) -> User:

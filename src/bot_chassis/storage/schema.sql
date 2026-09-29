@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS review_submissions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TEXT,
     published_at TEXT,
+    moderation_claim_token TEXT,
+    moderation_claimed_at TEXT,
     PRIMARY KEY (bot_id, review_id),
     CHECK (status IN ('pending', 'published', 'rejected')),
     CHECK (consent_to_publish IN (0, 1)),
@@ -183,3 +185,29 @@ CREATE TABLE IF NOT EXISTS user_bot_statuses (
 );
 CREATE INDEX IF NOT EXISTS idx_user_bot_statuses_user
     ON user_bot_statuses(bot_id, user_id);
+
+-- 9. Claim фоновых заданий сети (Gate 7 использует строки; книга Gate 6 уже выгружает таблицу)
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    bot_id TEXT NOT NULL,
+    job_key TEXT NOT NULL,
+    scheduled_for TEXT NOT NULL,
+    claimed_by TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    status TEXT,
+    details TEXT,
+    PRIMARY KEY (bot_id, job_key, scheduled_for)
+);
+
+-- 10. Неизменяемые операционные события для периодических отчётов рамы
+CREATE TABLE IF NOT EXISTS chassis_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    origin_bot_id TEXT NOT NULL DEFAULT '',
+    telegram_bot_id INTEGER NOT NULL DEFAULT 0,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_chassis_events_period
+    ON chassis_events(bot_id, event_type, created_at);

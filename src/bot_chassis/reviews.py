@@ -123,6 +123,21 @@ def create_reviews_router(
         )
         markup = build_review_moderation_keyboard(review_id)
         try:
+            await reviews.create(
+                bot_id,
+                review_id,
+                user_id,
+                origin_bot_id=origin_bot_id,
+                source_chat_id=waiting.origin_chat_id,
+                source_message_id=waiting.origin_message_id,
+                consent_to_publish=True,
+            )
+        except Exception as exc:
+            logger.error(f"Не удалось создать запись отзыва: {exc}")
+            await query.answer("Не удалось передать отзыв", show_alert=True)
+            pending.set(user_id, waiting)
+            return
+        try:
             chat_id, message_id = await review_sink.copy_to_moderation(
                 query.bot,
                 header=header,
@@ -132,17 +147,13 @@ def create_reviews_router(
             )
         except Exception as exc:
             logger.error(f"Не удалось отправить отзыв на модерацию: {exc}")
+            await reviews.delete_pending(bot_id, review_id)
             await query.answer("Не удалось передать отзыв", show_alert=True)
             pending.set(user_id, waiting)
             return
-        await reviews.create(
+        await reviews.set_moderation_message(
             bot_id,
             review_id,
-            user_id,
-            origin_bot_id=origin_bot_id,
-            source_chat_id=waiting.origin_chat_id,
-            source_message_id=waiting.origin_message_id,
-            consent_to_publish=True,
             moderation_chat_id=chat_id,
             moderation_message_id=message_id,
         )
@@ -187,6 +198,10 @@ def create_reviews_router(
         if not record.consent_to_publish:
             await query.answer("Нет согласия на публикацию", show_alert=True)
             return
+        claim_token = await reviews.claim_pending(bot_id, review_id)
+        if claim_token is None:
+            await query.answer("Уже обрабатывается")
+            return
         try:
             published = await review_sink.publish(
                 query.bot,
@@ -194,6 +209,7 @@ def create_reviews_router(
                 source_message_id=record.source_message_id,
             )
         except Exception as exc:
+            await reviews.release_claim(bot_id, review_id, claim_token)
             logger.error(f"Ошибка публикации отзыва {review_id}: {exc}")
             await query.answer("Ошибка публикации", show_alert=True)
             return
@@ -202,6 +218,7 @@ def create_reviews_router(
             review_id,
             published_chat_id=published.chat_id,
             published_message_id=published.message_id,
+            claim_token=claim_token,
         )
         if changed == 0:
             await query.answer("Уже обработано")

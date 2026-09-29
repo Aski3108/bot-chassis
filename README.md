@@ -2,7 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![aiogram 3.13+](https://img.shields.io/badge/aiogram-3.13+-blue.svg)](https://docs.aiogram.dev/)
-[![Tests](https://img.shields.io/badge/tests-80%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-pytest-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Универсальное переносимое модульное шасси для Telegram-ботов на `aiogram v3`.**  
@@ -49,20 +49,19 @@
 ### 1. Суб-шасси кнопок (Button Chassis) — ГОТОВО (19 тестов)
 - **Транспортная безопасность:** Неисчезающая `ReplyKeyboardMarkup` (`is_persistent=True`, `resize_keyboard=True`).
 - **Единый носитель клавиатуры:** Клавиатура привязана к постоянному сообщению `/start` или `/menu` и никогда не удаляется менеджером экранов.
-- **Системное меню:** Автоматическая регистрация команд в Bot API (`set_my_commands`) через хук запуска `register_button_chassis_startup(dp, bot)`. Команды `/start`, `/menu`, `/help`, `/support` объединяются с кастомными командами шлюза без затирания.
+- **Системное меню:** Автоматическая регистрация команд в Bot API (`set_my_commands`) через хук запуска `register_button_chassis_startup(dp, bot)`. Канон синего меню — одна команда `/menu` («📱 Восстановить кнопки меню»); кузовные `start`/`help`/`support` в него не входят.
 - **Сессионная гигиена:** Хранилище `PendingInputStore` со строгим TTL (15 мин). Клик по любой служебной или доменной кнопке мгновенно сбрасывает режим ввода тикета поддержки.
-- **Двусторонний мост поддержки:** Связка по композитному ключу `(chat_id, message_id) -> user_id`, фиксация карточки-шапки и копии сообщения пользователя. Атомарное сохранение на диск (`temp/support_threads.json` через `.tmp` и `os.replace`). Лимит активных тикетов без ответа (`max_active_tickets=5`). Полная тишина на служебную переписку админов между собой (`UNKNOWN_THREAD`).
+- **Двусторонний мост поддержки:** при постоянном `db_path` — продолжаемый SQLite-тикет; JSON-store остаётся одноразовым legacy. Лимит активных диалогов без ответа (`max_active_tickets=5`). Полная тишина на служебную переписку админов между собой (`UNKNOWN_THREAD`).
 - **Слоты контента (Дырки, а не содержимое):** Карточки Кабинета и Info подключаются через внешние колбэки (`render_cabinet_callback`, `render_info_callback`) с автоматическим запоминанием в `UserScreenTracker`.
 
 ### 2. Суб-шасси администрирования (Admin Chassis) — ГОТОВО
-- **Двухуровневая модель доступа:**
-  - `SUPER_ADMIN` (из конфига/env) — полный контроль, управление админами прямо из Telegram.
-  - `ADMIN` — просмотр дашборда, поиск пользователя, прямая связь.
-- **Динамический персистентный реестр:** Назначение и отзыв прав админа на лету без правки `.env` и без рестарта процесса.
-- **Дашборд здоровья и статистики:** Uptime, потребление RAM процесса, количество пользователей, открытые тикеты.
-- **User Inspector:** Поиск пользователя по Telegram ID, просмотр профиля, кнопка `[✉️ Написать пользователю]`, блокировка/разблокировка.
-- **Аварийный рубильник (Maintenance Mode):** Стопорит приём новых задач с вежливой заглушкой, не ломая навигацию.
-- **2-Step Confirmation:** Защита деструктивных операций одноразовыми токенами с подтверждением.
+- **Двухуровневая модель доступа:** staff видит сводку, статистику, поиск и рубильник; root дополнительно — рассылку, Excel, ручной `.db` и рестарт при переданном `ProcessControlPort`.
+- **Динамический персистентный реестр:** назначение и отзыв прав админа на лету без правки `.env` и без рестарта процесса.
+- **Сводка, не RAM-дашборд:** пользователи, active этого бота, новые сегодня, открытые обращения, Stars, последний бэкап, планировщик.
+- **User Inspector:** поиск по ID и `@username`, досье, санкции; роли и подарки только у root.
+- **Плавающая панель:** переходы правят текущее сообщение; итог операции остаётся постоянным текстом без кнопок, свежее меню уходит вниз.
+- **Аварийный рубильник (Maintenance Mode):** стопорит приём новых задач с вежливой заглушкой, не ломая навигацию и не глуша Stars.
+- **2-Step Confirmation:** деструктивные операции (включая рестарт) — одноразовый токен.
 
 ### 3. Суб-шасси платежей (Payment Chassis) — ГОТОВО (v1, Telegram Stars)
 - **Выдача талона, а не прикладного анализа:** Шасси отвечает за инвойс Telegram Stars, предоплату (`pre_checkout_query`), успешную оплату (`successful_payment`) и идемпотентность по `telegram_payment_charge_id`.
@@ -79,7 +78,7 @@
 - Специфические опросники, клинические шкалы и диагнозы (кузов PsyBot).
 - Расчёты стилометрии, лемм, токсичности и PDF C1–C6 (кузов Profiling).
 - Списки отслеживаемых чатов и ключевые слова (кузов Chat Listener).
-- Модули сбора отзывов и витрины кросс-промо экосистемы.
+- Витрины кросс-промо экосистемы и чужие платёжные шлюзы.
 - LLM-операторов саппорта и кризисные протоколы.
 
 ---
@@ -93,15 +92,16 @@ from aiogram import Bot
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.commands import register_button_chassis_startup
+from bot_chassis.user_lifecycle import CANON_ALLOWED_UPDATES
 
 async def main(bot: Bot) -> None:
     config = BotChassisConfig(bot_id="demo", superadmin_ids=(108234567,))
     chassis = await create_complete_chassis(bot, config, domain_rows=(("📊 Задачи",),))
     register_button_chassis_startup(chassis.dp, bot)
-    await chassis.dp.start_polling(bot)
+    await chassis.dp.start_polling(bot, allowed_updates=list(CANON_ALLOWED_UPDATES))
 ```
 
-Эталон: `examples/run_complete_chassis.py`. Как цепляется кузов и порты — [docs/CHASSIS.md](docs/CHASSIS.md).
+Эталон: `examples/run_complete_chassis.py`. Переменные рамы: `examples/.env.example`. Как цепляется кузов и порты — [docs/CHASSIS.md](docs/CHASSIS.md).
 
 Только кнопки (без БД и админки): `create_button_chassis_router` и `examples/run_example.py`. Этот пример не наращивать.
 
@@ -151,4 +151,4 @@ if __name__ == "__main__":
 pytest tests/ -v
 ```
 
-Полная рама: **80 passed**. Замороженные тесты кнопок: `pytest tests/test_chassis.py -v` (19 шт.).
+Полная рама: `pytest tests -q`. Замороженные тесты кнопок: `pytest tests/test_chassis.py -v` (19 шт.). Актуальный канон и чек-листы миграции — [docs/CHASSIS.md](docs/CHASSIS.md).

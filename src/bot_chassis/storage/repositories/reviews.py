@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
@@ -121,6 +122,7 @@ class ReviewSubmissionsRepository:
         *,
         published_chat_id: int,
         published_message_id: int,
+        claim_token: str,
     ) -> int:
         def _op(conn) -> int:
             now = utc_now()
@@ -131,11 +133,99 @@ class ReviewSubmissionsRepository:
                     published_chat_id = ?,
                     published_message_id = ?,
                     reviewed_at = COALESCE(reviewed_at, ?),
-                    published_at = ?
+                    published_at = ?,
+                    moderation_claim_token = NULL,
+                    moderation_claimed_at = NULL
                 WHERE bot_id = ? AND review_id = ?
                   AND status = 'pending' AND consent_to_publish = 1
+                  AND moderation_claim_token = ?
                 """,
-                (published_chat_id, published_message_id, now, now, bot_id, review_id),
+                (
+                    published_chat_id,
+                    published_message_id,
+                    now,
+                    now,
+                    bot_id,
+                    review_id,
+                    claim_token,
+                ),
+            )
+            return int(cur.rowcount)
+
+        return await self._engine.run(_op)
+
+    async def claim_pending(self, bot_id: str, review_id: str) -> str | None:
+        """Атомарно резервирует один pending-отзыв за одной публикацией."""
+        token = uuid.uuid4().hex
+
+        def _op(conn) -> str | None:
+            cur = conn.execute(
+                """
+                UPDATE review_submissions
+                SET moderation_claim_token = ?,
+                    moderation_claimed_at = ?
+                WHERE bot_id = ? AND review_id = ?
+                  AND status = 'pending' AND consent_to_publish = 1
+                  AND (
+                      moderation_claim_token IS NULL
+                      OR moderation_claimed_at IS NULL
+                      OR moderation_claimed_at <= datetime('now', '-15 minutes')
+                  )
+                """,
+                (token, utc_now(), bot_id, review_id),
+            )
+            return token if cur.rowcount == 1 else None
+
+        return await self._engine.run(_op)
+
+    async def release_claim(self, bot_id: str, review_id: str, claim_token: str) -> int:
+        """Освобождает резерв после ошибки внешней публикации для безопасного повтора."""
+
+        def _op(conn) -> int:
+            cur = conn.execute(
+                """
+                UPDATE review_submissions
+                SET moderation_claim_token = NULL,
+                    moderation_claimed_at = NULL
+                WHERE bot_id = ? AND review_id = ?
+                  AND status = 'pending' AND moderation_claim_token = ?
+                """,
+                (bot_id, review_id, claim_token),
+            )
+            return int(cur.rowcount)
+
+        return await self._engine.run(_op)
+
+    async def set_moderation_message(
+        self,
+        bot_id: str,
+        review_id: str,
+        *,
+        moderation_chat_id: int,
+        moderation_message_id: int,
+    ) -> int:
+        def _op(conn) -> int:
+            cur = conn.execute(
+                """
+                UPDATE review_submissions
+                SET moderation_chat_id = ?, moderation_message_id = ?
+                WHERE bot_id = ? AND review_id = ? AND status = 'pending'
+                """,
+                (moderation_chat_id, moderation_message_id, bot_id, review_id),
+            )
+            return int(cur.rowcount)
+
+        return await self._engine.run(_op)
+
+    async def delete_pending(self, bot_id: str, review_id: str) -> int:
+        def _op(conn) -> int:
+            cur = conn.execute(
+                """
+                DELETE FROM review_submissions
+                WHERE bot_id = ? AND review_id = ? AND status = 'pending'
+                  AND moderation_claim_token IS NULL
+                """,
+                (bot_id, review_id),
             )
             return int(cur.rowcount)
 
@@ -150,6 +240,7 @@ class ReviewSubmissionsRepository:
                 SET status = 'rejected',
                     reviewed_at = ?
                 WHERE bot_id = ? AND review_id = ? AND status = 'pending'
+                  AND moderation_claim_token IS NULL
                 """,
                 (now, bot_id, review_id),
             )

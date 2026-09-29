@@ -17,15 +17,17 @@ async def send_admin_audit(
     config: BotChassisConfig,
     text: str,
     is_html: bool = False,
-) -> None:
-    """Отправить строку аудита. При is_html=False текст экранируется здесь.
+) -> bool:
+    """Отправить строку аудита и вернуть факт доставки.
+
+    При is_html=False текст экранируется здесь.
 
     При is_html=True вызывающий экранирует пользовательские поля сам.
     Ошибка парсера Telegram откатывается на экранированный текст.
     """
     destination = resolve_service_destination(config, "audit")
     if destination is None or bot is None:
-        return
+        return False
     payload = text if is_html else html.escape(text)
     try:
         try:
@@ -34,5 +36,7 @@ async def send_admin_audit(
             if not is_html:
                 raise
             await deliver_service_message(bot, destination, html.escape(text), parse_mode="HTML")
+        return True
     except Exception:
         logger.exception("Не удалось отправить аудит-лог")
+        return False

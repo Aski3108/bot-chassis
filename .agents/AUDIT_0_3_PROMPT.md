@@ -28,9 +28,10 @@
 4. `.agents/PROJECT_CONTEXT.md`
 5. `.agents/ACTIVE_PLANS.md`
 6. `.agents/TASK_TODO.md`
-7. `.agents/UPGRADE_0_3_PLAN.md`
-8. релевантные разделы `docs/CHASSIS.md`
-9. последние релевантные записи `.agents/PROJECT_LOG.md`
+7. `.agents/AUDIT_LOG_0_3.md`
+8. `.agents/UPGRADE_0_3_PLAN.md`
+9. релевантные разделы `docs/CHASSIS.md`
+10. последние релевантные записи `.agents/PROJECT_LOG.md`
 
 После этого проверь реальный diff `BASE_REF..HEAD_REF`, затронутый код, миграции
 и тесты. Не доверяй отчёту исполнителя без проверки репозитория.

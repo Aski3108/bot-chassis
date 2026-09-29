@@ -400,7 +400,10 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls["n"], 2)
 
         bot.send_message = AsyncMock(side_effect=RuntimeError("net"))
-        alerting = ErrorAlertMiddleware(BotChassisConfig(bot_id="bot_a", support_chat_id=-100))
+        alerting = ErrorAlertMiddleware(
+            BotChassisConfig(bot_id="bot_a", support_chat_id=-100),
+            self.storage,
+        )
         with patch.object(PreCheckoutQuery, "answer", new_callable=AsyncMock):
             self.assertIsNone(await alerting(boom, pre, {"bot": bot}))
         self.assertEqual(calls["n"], 3)
@@ -408,6 +411,12 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertIn("&lt;script&gt;", text)
         self.assertNotIn("<script>", text)
         self.assertEqual(bot.send_message.await_args.kwargs["parse_mode"], "HTML")
+        errors = await self.storage.engine.run(
+            lambda conn: conn.execute(
+                "SELECT COUNT(*) FROM chassis_events WHERE event_type = 'handler_error'"
+            ).fetchone()[0]
+        )
+        self.assertEqual(errors, 1)
 
         bot.send_message = AsyncMock()
         audit_first = ErrorAlertMiddleware(

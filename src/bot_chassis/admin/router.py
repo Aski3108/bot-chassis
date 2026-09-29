@@ -7,6 +7,7 @@ import inspect
 import os
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from typing import Sequence
 
 from aiogram import F, Router
@@ -24,8 +25,10 @@ from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
 from ..config import BotChassisConfig, resolved_origin
+from ..policies import BACKUP_JOB_KEY, UTC_PLUS_5, BackupPolicy, ReportingPolicy
 from ..user_lifecycle import STATUS_LABELS
 from ..ports.admin_extra import ExtraAdminActions
+from ..storage.backup import write_manual_snapshot
 from ..storage import Storage
 from .audit import send_admin_audit
 from .broadcast import is_awaiting_broadcast_text, register_broadcast
@@ -37,15 +40,29 @@ from .lookup import (
     cancel_admin_lookup,
 )
 from .user_resolve import format_ambiguous_users, resolve_user_token
-from .export import EXPORT_SCOPES, build_export
-from .filters import AdminRoleFilter, SuperadminRoleFilter
+from .export import EXPORT_SCOPES, XLSX_FILENAME, build_export, build_xlsx_export
+from .filters import AdminRoleFilter, SuperadminRoleFilter, SUPERADMIN_ONLY
+from .process import register_process_control
+from .screens import (
+    CB_BACK,
+    CB_DO_BACKUP,
+    CB_DO_MAINT,
+    CB_GO_BACKUP,
+    CB_GO_BCAST,
+    CB_GO_EXPORT,
+    CB_GO_MAINT,
+    CB_GO_STATS,
+    AdminScreenTracker,
+    command_cheatsheet,
+    home_keyboard,
+    nav_keyboard,
+)
 
 CB_MAINT = "adm_maint"
 CB_EXPORT = "adm_export"
 CB_BROADCAST = "adm_bcast"
 CB_HOME = "adm_home"
 CB_FIND = "adm_find"
-SUPERADMIN_ONLY = "Только для суперадмина"
 BAN_USAGE = "Формат: /ban ID|@username [причина]"
 UNBAN_USAGE = "Формат: /unban ID|@username"
 SHADOW_USAGE = "Формат: /shadowban ID|@username 0|1"
@@ -89,18 +106,56 @@ def create_admin_router(
     extra_user_dossier_rows=None,
     bot_display_name_provider=None,
     pending_store=None,
+    backup_policy=None,
+    reporting_policy=None,
+    screens: AdminScreenTracker | None = None,
+    process_control=None,
 ) -> Router:
     router = Router(name="admin")
     staff = AdminRoleFilter(bot_id, storage.roles)
     root = SuperadminRoleFilter(bot_id, storage.roles)
+    panels = screens or AdminScreenTracker()
+
+    async def _actor_is_root(user_id: int) -> bool:
+        return await storage.roles.has_any_role(bot_id, user_id, ("superadmin",))
+
+    async def _home_bundle(actor_id: int, telegram_bot_id: int) -> tuple[str, InlineKeyboardMarkup]:
+        is_root = await _actor_is_root(actor_id)
+        return await _home(
+            storage,
+            bot_id,
+            extra_actions,
+            is_root=is_root,
+            telegram_bot_id=telegram_bot_id,
+            backup_policy=backup_policy,
+            reporting_policy=reporting_policy,
+            process_control=process_control,
+        )
+
+    async def _raise_home(bot, actor_id: int, is_root: bool, telegram_bot_id: int) -> None:
+        text, markup = await _home(
+            storage,
+            bot_id,
+            extra_actions,
+            is_root=is_root,
+            telegram_bot_id=telegram_bot_id,
+            backup_policy=backup_policy,
+            reporting_policy=reporting_policy,
+            process_control=process_control,
+        )
+        await panels.send_panel(bot, bot_id, actor_id, text, markup)
+
+    async def _show_home_call(call: CallbackQuery, actor_id: int) -> None:
+        text, markup = await _home_bundle(actor_id, int(call.bot.id))
+        await panels.edit_or_send(call, bot_id, actor_id, text, markup)
 
     @router.message(Command("admin", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_admin(message: Message) -> None:
         user = message.from_user
         if user is None or await _is_banned(storage, bot_id, user.id):
             return
-        text, markup = await _home(storage, bot_id, extra_actions)
-        await message.answer(text, reply_markup=markup, parse_mode="HTML")
+        text, markup = await _home_bundle(user.id, int(message.bot.id))
+        await panels.send_panel(message.bot, bot_id, user.id, text, markup)
 
     @router.message(Command("ban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_ban(message: Message) -> None:
@@ -290,12 +345,13 @@ def create_admin_router(
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
             bot_display_name_provider=bot_display_name_provider,
+            is_root=await _actor_is_root(actor.id),
         )
         if card is None:
             await _reply(message, USER_NOT_FOUND)
             return
         text, markup = card
-        await message.answer(text, reply_markup=markup, parse_mode="HTML")
+        await panels.send_panel(message.bot, bot_id, actor.id, text, markup)
 
     @router.callback_query(F.data.startswith("adm_usr:"), staff)
     async def handle_user_action(call: CallbackQuery) -> None:
@@ -318,16 +374,20 @@ def create_admin_router(
         if error:
             await call.answer(error, show_alert=True)
             return
-        await _edit_dossier(
-            call,
+        is_root_actor = await _actor_is_root(user.id)
+        card = await _dossier(
             storage,
             bot_id,
             target_id,
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
             bot_display_name_provider=bot_display_name_provider,
+            is_root=is_root_actor,
         )
+        report = card[0] if card is not None else "Готово"
+        await panels.freeze_as_report(call, bot_id, user.id, report)
         await call.answer()
+        await _raise_home(call.bot, user.id, is_root_actor, int(call.bot.id))
 
     @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_export_command(message: Message) -> None:
@@ -349,7 +409,7 @@ def create_admin_router(
         if _command_args(message):
             await _reply(message, BACKUP_USAGE)
             return
-        await _send_backup(message.bot, storage, actor.id)
+        await _send_backup(message.bot, storage, actor.id, backup_policy=backup_policy)
 
     @router.message(Command("refund", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
     async def handle_refund(message: Message) -> None:
@@ -478,11 +538,64 @@ def create_admin_router(
                 return
         await _reply(message, MAINTENANCE_USAGE)
 
-    @router.callback_query(F.data == CB_MAINT, staff)
-    async def handle_maintenance(call: CallbackQuery) -> None:
+    async def _require_staff_call(call: CallbackQuery):
         user = call.from_user
         if user is None or await _is_banned(storage, bot_id, user.id):
             await call.answer()
+            return None
+        return user
+
+    async def _require_root_call(call: CallbackQuery):
+        user = await _require_staff_call(call)
+        if user is None:
+            return None
+        if not await root(call):
+            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+            return None
+        return user
+
+    @router.callback_query(F.data.in_({CB_HOME, CB_BACK}), staff)
+    async def handle_home_callback(call: CallbackQuery) -> None:
+        user = await _require_staff_call(call)
+        if user is None:
+            return
+        await _show_home_call(call, user.id)
+        await call.answer()
+
+    @router.callback_query(F.data == CB_GO_STATS, staff)
+    async def handle_stats(call: CallbackQuery) -> None:
+        user = await _require_staff_call(call)
+        if user is None:
+            return
+        dash = await _dashboard(
+            storage,
+            bot_id,
+            int(call.bot.id),
+            backup_policy=backup_policy,
+            reporting_policy=reporting_policy,
+        )
+        text = _stats_text(dash)
+        await panels.edit_or_send(call, bot_id, user.id, text, nav_keyboard())
+        await call.answer()
+
+    @router.callback_query(F.data.in_({CB_GO_MAINT, CB_MAINT}), staff)
+    async def handle_maint_screen(call: CallbackQuery) -> None:
+        user = await _require_staff_call(call)
+        if user is None:
+            return
+        current, reason = await storage.bot_settings.get_maintenance_status(bot_id)
+        label = "Снять рубильник" if current else "Опустить рубильник"
+        text = "🔴 Рубильник опущен" if current else "🟢 Рубильник снят"
+        if current and reason:
+            text += "\n" + html.escape(reason)
+        markup = nav_keyboard([InlineKeyboardButton(text=label, callback_data=CB_DO_MAINT)])
+        await panels.edit_or_send(call, bot_id, user.id, text, markup)
+        await call.answer()
+
+    @router.callback_query(F.data == CB_DO_MAINT, staff)
+    async def handle_maintenance(call: CallbackQuery) -> None:
+        user = await _require_staff_call(call)
+        if user is None:
             return
         current, reason = await storage.bot_settings.get_maintenance_status(bot_id)
         turned_on = not current
@@ -495,29 +608,93 @@ def create_admin_router(
         state = "опущен" if turned_on else "снят"
         username = f" @{user.username}" if user.username else ""
         await send_admin_audit(call.bot, config, f"Рубильник {state}. user_id={user.id}{username}")
-        await _edit_home(call, storage, bot_id, extra_actions)
+        report = "Рубильник опущен" if turned_on else "Рубильник снят"
+        if turned_on and reason:
+            report += ". Причина: " + html.escape(reason)
+        await panels.freeze_as_report(call, bot_id, user.id, report)
+        await call.answer()
+        await _raise_home(call.bot, user.id, await _actor_is_root(user.id), int(call.bot.id))
+
+    @router.callback_query(F.data == CB_GO_BCAST, staff)
+    async def handle_broadcast_screen(call: CallbackQuery) -> None:
+        user = await _require_root_call(call)
+        if user is None:
+            return
+        markup = nav_keyboard(
+            [InlineKeyboardButton(text="Написать текст", callback_data=CB_BROADCAST)]
+        )
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            user.id,
+            "📢 Рассылка активным пользователям этого бота, 25 сообщений/с.",
+            markup,
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == CB_GO_EXPORT, staff)
+    async def handle_export_screen(call: CallbackQuery) -> None:
+        user = await _require_root_call(call)
+        if user is None:
+            return
+        markup = nav_keyboard(
+            [InlineKeyboardButton(text="📥 Скачать Excel", callback_data=CB_EXPORT)]
+        )
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            user.id,
+            "Выгрузка SQLite в .xlsx. Команда /export по-прежнему отдаёт CSV/ZIP.",
+            markup,
+        )
         await call.answer()
 
     @router.callback_query(F.data == CB_EXPORT, staff)
     async def handle_export(call: CallbackQuery) -> None:
-        user = call.from_user
-        if user is None or await _is_banned(storage, bot_id, user.id):
-            await call.answer()
-            return
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+        user = await _require_root_call(call)
+        if user is None:
             return
         await call.answer("Формирую выгрузку...")
-        await _send_export(call.bot, storage, config, bot_id, user.id, "all")
+        await _send_xlsx_export(call.bot, storage, config, bot_id, user.id)
+        await _raise_home(call.bot, user.id, True, int(call.bot.id))
 
-    @router.callback_query(F.data == CB_HOME, staff)
-    async def handle_home_callback(call: CallbackQuery) -> None:
-        user = call.from_user
-        if user is None or await _is_banned(storage, bot_id, user.id):
-            await call.answer()
+    @router.callback_query(F.data == CB_GO_BACKUP, staff)
+    async def handle_backup_screen(call: CallbackQuery) -> None:
+        user = await _require_root_call(call)
+        if user is None:
             return
-        await _edit_home(call, storage, bot_id, extra_actions)
+        markup = nav_keyboard(
+            [InlineKeyboardButton(text="💾 Скачать .db", callback_data=CB_DO_BACKUP)]
+        )
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            user.id,
+            "Ручной снимок SQLite для восстановления. Ночной ZIP в каталог не отправляется в Telegram.",
+            markup,
+        )
         await call.answer()
+
+    @router.callback_query(F.data == CB_DO_BACKUP, staff)
+    async def handle_backup_button(call: CallbackQuery) -> None:
+        user = await _require_root_call(call)
+        if user is None:
+            return
+        await call.answer("Готовлю снимок...")
+        await _send_backup(call.bot, storage, user.id, backup_policy=backup_policy)
+        await _raise_home(call.bot, user.id, True, int(call.bot.id))
+
+    register_process_control(
+        router,
+        bot_id=bot_id,
+        config=config,
+        staff=staff,
+        root=root,
+        panels=panels,
+        process_control=process_control,
+        raise_home=_raise_home,
+        require_root_call=_require_root_call,
+    )
 
     if extra_actions is not None:
         @router.callback_query(F.data.startswith("adm_ops:"), staff)
@@ -528,15 +705,20 @@ def create_admin_router(
 
     @router.callback_query(F.data == CB_FIND, staff)
     async def start_user_lookup(call: CallbackQuery) -> None:
-        actor = call.from_user
-        if actor is None or await _is_banned(storage, bot_id, actor.id):
-            await call.answer()
+        actor = await _require_staff_call(call)
+        if actor is None:
             return
         if is_awaiting_broadcast_text(bot_id, actor.id):
             await call.answer("Сначала завершите рассылку", show_alert=True)
             return
         begin_admin_lookup(bot_id, actor.id, pending_store)
-        await call.bot.send_message(actor.id, FIND_PROMPT)
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            actor.id,
+            FIND_PROMPT + "\n/cancel — отмена.",
+            nav_keyboard(),
+        )
         await call.answer()
 
     @router.message(AwaitingAdminLookup(bot_id, pending_store), F.chat.type == ChatType.PRIVATE, staff)
@@ -564,74 +746,96 @@ def create_admin_router(
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
             bot_display_name_provider=bot_display_name_provider,
+            is_root=await _actor_is_root(actor.id),
         )
         if card is None:
             await _reply(message, USER_NOT_FOUND)
             return
         dossier_text, markup = card
-        await message.answer(dossier_text, reply_markup=markup, parse_mode="HTML")
+        await panels.send_panel(message.bot, bot_id, actor.id, dossier_text, markup)
 
-    register_broadcast(router, bot_id, storage, config, staff)
+    register_broadcast(
+        router,
+        bot_id,
+        storage,
+        config,
+        staff,
+        root=root,
+        raise_home=_raise_home,
+    )
     return router
 
 
 def _home_keyboard(
-    maintenance_on: bool,
+    *,
+    is_root: bool,
     extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
+    show_restart: bool = False,
 ) -> InlineKeyboardMarkup:
-    maint_label = "🔴 Переключить рубильник" if maintenance_on else "🟢 Переключить рубильник"
-    rows = [
-        [InlineKeyboardButton(text=maint_label, callback_data=CB_MAINT)],
-        [InlineKeyboardButton(text="📥 Выгрузка базы (Excel)", callback_data=CB_EXPORT)],
-        [InlineKeyboardButton(text="📢 Новая рассылка", callback_data=CB_BROADCAST)],
-        [InlineKeyboardButton(text="Найти пользователя", callback_data=CB_FIND)],
-    ]
-    for row in extra_rows or ():
-        buttons = [
-            InlineKeyboardButton(text=text, callback_data=callback_data)
-            for text, callback_data in row
-        ]
-        if buttons:
-            rows.append(buttons)
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
+    return home_keyboard(is_root=is_root, extra_rows=extra_rows, show_restart=show_restart)
 
 
 async def _home(
     storage: Storage,
     bot_id: str,
     extra_actions: ExtraAdminActions | None = None,
+    *,
+    is_root: bool,
+    telegram_bot_id: int,
+    backup_policy: BackupPolicy | None = None,
+    reporting_policy: ReportingPolicy | None = None,
+    process_control=None,
 ) -> tuple[str, InlineKeyboardMarkup]:
-    total, banned, paid_sum, gifts, maintenance_on, reason = await _summary(storage, bot_id)
+    dash = await _dashboard(
+        storage,
+        bot_id,
+        telegram_bot_id,
+        backup_policy=backup_policy,
+        reporting_policy=reporting_policy,
+    )
     lines = [
         "🛠 <b>Админка</b>",
-        f"Пользователи: {total}",
-        f"Бан: {banned}",
-        f"Оплаты: {paid_sum} XTR",
-        f"Подарки: {gifts}",
-        "Рубильник: " + ("🔴 опущен" if maintenance_on else "🟢 снят"),
+        f"Пользователи: {dash['total']}",
+        f"Active (этот бот): {dash['active']}",
+        f"Новые сегодня: {dash['new_today']}",
+        f"Открытые обращения: {dash['open_tickets']}",
+        f"Платежи Stars сегодня: {dash['stars_today']}",
+        f"Последний бэкап: {html.escape(dash['last_backup'])}",
+        f"Планировщик: {html.escape(dash['scheduler'])}",
+        "Рубильник: " + ("🔴 опущен" if dash["maintenance_on"] else "🟢 снят"),
     ]
-    if maintenance_on and reason:
-        lines.append(html.escape(reason))
-    extra_rows = extra_actions.home_rows() if extra_actions is not None else ()
-    return "\n".join(lines), _home_keyboard(maintenance_on, extra_rows)
+    if dash["maintenance_on"] and dash["reason"]:
+        lines.append(html.escape(str(dash["reason"])))
+    lines.append(command_cheatsheet(is_root=is_root))
+    extra_rows = (
+        extra_actions.home_rows()
+        if extra_actions is not None and is_root
+        else ()
+    )
+    return "\n".join(lines), home_keyboard(
+        is_root=is_root,
+        extra_rows=extra_rows,
+        show_restart=process_control is not None,
+    )
 
 
-async def _edit_home(
-    call: CallbackQuery,
-    storage: Storage,
-    bot_id: str,
-    extra_actions: ExtraAdminActions | None = None,
-) -> None:
-    message = call.message
-    if message is None or isinstance(message, InaccessibleMessage):
-        return
-    text, markup = await _home(storage, bot_id, extra_actions)
-    try:
-        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-    except Exception:
-        logger.exception("Не удалось обновить экран /admin")
+def _stats_text(dash: dict) -> str:
+    return "\n".join(
+        [
+            "📊 <b>Статистика</b>",
+            f"Пользователи: {dash['total']}",
+            f"Бан: {dash['banned']}",
+            f"Active (этот бот): {dash['active']}",
+            f"Новые сегодня: {dash['new_today']}",
+            f"Открытые обращения: {dash['open_tickets']}",
+            f"Платежи Stars сегодня: {dash['stars_today']}",
+            f"Оплаты всего: {dash['paid_sum']} XTR",
+            f"Подарки: {dash['gifts']}",
+            f"Последний бэкап: {html.escape(dash['last_backup'])}",
+            f"Планировщик: {html.escape(dash['scheduler'])}",
+            "Рубильник: " + ("🔴 опущен" if dash['maintenance_on'] else "🟢 снят"),
+        ]
+    )
 
 
 def _command_args(message: Message) -> list[str]:
@@ -697,6 +901,8 @@ async def _dossier(
     extra_user_dossier_lines=None,
     extra_user_dossier_rows=None,
     bot_display_name_provider=None,
+    *,
+    is_root: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
     user = await storage.users.get_user(bot_id, user_id)
     if user is None:
@@ -712,7 +918,12 @@ async def _dossier(
     if extra_lines:
         text = text + "\n" + "\n".join(extra_lines)
     extra_rows = await _invoke_user_port(extra_user_dossier_rows, user_id)
-    return text, _dossier_keyboard(user, "admin" in roles, extra_rows=extra_rows or ())
+    return text, _dossier_keyboard(
+        user,
+        "admin" in roles,
+        extra_rows=extra_rows or (),
+        is_root=is_root,
+    )
 
 
 async def _lifecycle_lines(storage: Storage, bot_id: str, user, provider) -> str:
@@ -770,18 +981,25 @@ def _dossier_keyboard(
     user,
     has_admin: bool,
     extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
+    *,
+    is_root: bool = False,
 ) -> InlineKeyboardMarkup:
     ban_label = "🟢 Разбанить" if user.is_banned else "🔴 Забанить"
     shadow_label = "👻 Теневой бан: ВЫКЛ" if user.is_shadow_banned else "👻 Теневой бан: ВКЛ"
-    role_label = "🚫 Снять Admin" if has_admin else "👑 Роль Admin"
     uid = user.user_id
     rows = [
         [InlineKeyboardButton(text=ban_label, callback_data=_user_callback("ban", uid))],
         [InlineKeyboardButton(text=shadow_label, callback_data=_user_callback("shban", uid))],
-        [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
-        [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
-        [InlineKeyboardButton(text=role_label, callback_data=_user_callback("role_adm", uid))],
     ]
+    if is_root:
+        role_label = "🚫 Снять Admin" if has_admin else "👑 Роль Admin"
+        rows.extend(
+            [
+                [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
+                [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
+                [InlineKeyboardButton(text=role_label, callback_data=_user_callback("role_adm", uid))],
+            ]
+        )
     for row in extra_rows or ():
         buttons = [
             InlineKeyboardButton(text=text, callback_data=callback_data)
@@ -789,7 +1007,12 @@ def _dossier_keyboard(
         ]
         if buttons:
             rows.append(buttons)
-    rows.append([InlineKeyboardButton(text="« Главное меню админки", callback_data=CB_HOME)])
+    rows.append(
+        [
+            InlineKeyboardButton(text="« Назад", callback_data=CB_BACK),
+            InlineKeyboardButton(text="В главное меню", callback_data=CB_HOME),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -857,35 +1080,6 @@ async def _apply_dossier_action(call, storage, config, bot_id: str, action: str,
         return _grant_error(err)
     await send_admin_audit(call.bot, config, f"Роль admin выдана user_id={target_id}. actor={actor_id}")
     return None
-
-
-async def _edit_dossier(
-    call: CallbackQuery,
-    storage: Storage,
-    bot_id: str,
-    user_id: int,
-    extra_user_dossier_lines=None,
-    extra_user_dossier_rows=None,
-    bot_display_name_provider=None,
-) -> None:
-    message = call.message
-    if message is None or isinstance(message, InaccessibleMessage):
-        return
-    card = await _dossier(
-        storage,
-        bot_id,
-        user_id,
-        extra_user_dossier_lines=extra_user_dossier_lines,
-        extra_user_dossier_rows=extra_user_dossier_rows,
-        bot_display_name_provider=bot_display_name_provider,
-    )
-    if card is None:
-        return
-    text, markup = card
-    try:
-        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-    except Exception:
-        logger.exception("Не удалось обновить досье /user")
 
 
 async def _role_names(storage: Storage, bot_id: str, user_id: int) -> list[str]:
@@ -973,7 +1167,61 @@ async def _send_export(bot, storage: Storage, config: BotChassisConfig, bot_id: 
     await send_admin_audit(bot, config, f"Экспорт {scope}. actor={actor_id}")
 
 
-async def _send_backup(bot, storage: Storage, actor_id: int) -> None:
+async def _send_xlsx_export(bot, storage: Storage, config: BotChassisConfig, bot_id: str, actor_id: int) -> None:
+    path = await build_xlsx_export(storage, bot_id)
+    try:
+        await bot.send_document(
+            chat_id=actor_id,
+            document=FSInputFile(path, filename=XLSX_FILENAME),
+        )
+    except Exception:
+        logger.exception("Не удалось отправить Excel-книгу")
+        try:
+            await bot.send_message(actor_id, "Не удалось отправить выгрузку")
+        except Exception:
+            logger.exception("Не удалось сообщить об ошибке выгрузки")
+        return
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    await send_admin_audit(bot, config, f"Экспорт xlsx. actor={actor_id}")
+
+
+async def _send_backup(bot, storage: Storage, actor_id: int, backup_policy=None) -> None:
+    if backup_policy is not None:
+        try:
+            path = await write_manual_snapshot(storage.engine, backup_policy)
+        except Exception:
+            logger.exception("Не удалось создать снапшот")
+            await _notify(bot, actor_id, "Не удалось отправить снапшот")
+            return
+        size = os.path.getsize(path)
+        limit = backup_policy.transport_limit_bytes
+        if size >= limit:
+            await _notify(
+                bot,
+                actor_id,
+                f"Снапшот {size} байт не помещается в лимит {limit} байт. Копия оставлена: {path.name}",
+            )
+            return
+        try:
+            await bot.send_document(chat_id=actor_id, document=FSInputFile(path, filename="backup.db"))
+        except Exception:
+            logger.exception("Не удалось отправить снапшот")
+            await _notify(
+                bot,
+                actor_id,
+                f"Не удалось отправить снапшот. Копия оставлена: {path.name}",
+            )
+            return
+        try:
+            os.unlink(path)
+        except OSError:
+            logger.exception("Не удалось удалить отправленный ручной снапшот")
+        return
+
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     try:
@@ -1081,8 +1329,24 @@ async def _is_banned(storage: Storage, bot_id: str, user_id: int) -> bool:
     return bool(user and user.is_banned)
 
 
-async def _summary(storage: Storage, bot_id: str) -> tuple[int, int, int, int, bool, str | None]:
-    def _op(conn) -> tuple[int, int, int, int, bool, str | None]:
+async def _dashboard(
+    storage: Storage,
+    bot_id: str,
+    telegram_bot_id: int,
+    *,
+    backup_policy: BackupPolicy | None = None,
+    reporting_policy: ReportingPolicy | None = None,
+) -> dict:
+    midnight = datetime.now(UTC_PLUS_5).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = midnight.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    last_backup = await storage.scheduled_jobs.latest_done(bot_id, BACKUP_JOB_KEY)
+    last_backup_label = "—"
+    if last_backup is not None:
+        stamp = last_backup.get("completed_at") or last_backup.get("scheduled_for") or ""
+        name = last_backup.get("details") or ""
+        last_backup_label = f"{stamp} {name}".strip() or "—"
+
+    def _op(conn) -> dict:
         users = conn.execute(
             """
             SELECT COUNT(*) AS total,
@@ -1110,15 +1374,67 @@ async def _summary(storage: Storage, bot_id: str) -> tuple[int, int, int, int, b
             "SELECT is_maintenance, maintenance_reason FROM bot_settings WHERE bot_id = ?",
             (bot_id,),
         ).fetchone()
+        active = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM user_bot_statuses
+            WHERE bot_id = ? AND telegram_bot_id = ? AND status = 'active'
+            """,
+            (bot_id, telegram_bot_id),
+        ).fetchone()
+        new_today = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM users
+            WHERE bot_id = ? AND created_at >= ?
+            """,
+            (bot_id, today_start),
+        ).fetchone()
+        open_tickets = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM support_threads
+            WHERE bot_id = ? AND message_role = 'header'
+              AND ticket_status IN ('open', 'in_progress')
+            """,
+            (bot_id,),
+        ).fetchone()
+        stars_today = conn.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0) AS stars
+            FROM transactions
+            WHERE bot_id = ? AND provider = 'telegram_stars' AND status = 'paid'
+              AND created_at >= ?
+            """,
+            (bot_id, today_start),
+        ).fetchone()
         maintenance_on = bool(settings["is_maintenance"]) if settings else False
         reason = settings["maintenance_reason"] if settings else None
-        return (
-            int(users["total"]),
-            int(users["banned"]),
-            int(paid["paid_sum"]),
-            int(gifts["n"]),
-            maintenance_on,
-            reason,
-        )
+        return {
+            "total": int(users["total"]),
+            "banned": int(users["banned"]),
+            "paid_sum": int(paid["paid_sum"]),
+            "gifts": int(gifts["n"]),
+            "maintenance_on": maintenance_on,
+            "reason": reason,
+            "active": int(active["n"]),
+            "new_today": int(new_today["n"]),
+            "open_tickets": int(open_tickets["n"]),
+            "stars_today": int(stars_today["stars"]),
+        }
 
-    return await storage.engine.run(_op)
+    data = await storage.engine.run(_op)
+    data["last_backup"] = last_backup_label
+    data["scheduler"] = _scheduler_label(backup_policy, reporting_policy)
+    return data
+
+
+def _scheduler_label(
+    backup_policy: BackupPolicy | None,
+    reporting_policy: ReportingPolicy | None,
+) -> str:
+    if backup_policy is None and reporting_policy is None:
+        return "выключен"
+    bits = []
+    if backup_policy is not None:
+        bits.append(f"backup {backup_policy.hour:02d}:{backup_policy.minute:02d} {backup_policy.tz_label}")
+    if reporting_policy is not None:
+        bits.append(f"report {reporting_policy.hour:02d}:{reporting_policy.minute:02d} {reporting_policy.tz_label}")
+    return "включён (" + "; ".join(bits) + ")"

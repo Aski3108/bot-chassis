@@ -158,6 +158,12 @@ class TestPaymentGate(unittest.IsolatedAsyncioTestCase):
         await self._pre_checkout(7, "sku:admin_grant:7:abcd")
         self.assertFalse(self._answers()[1].ok)
         self.assertEqual(self._answers()[1].error_message, PAYLOAD_MISMATCH_ERROR)
+        failures = await self.storage.engine.run(
+            lambda conn: conn.execute(
+                "SELECT COUNT(*) FROM chassis_events WHERE event_type = 'payment_error'"
+            ).fetchone()[0]
+        )
+        self.assertEqual(failures, 7)
 
     async def test_successful_payment_records_once_and_alerts(self) -> None:
         await self.storage.bot_settings.set_maintenance_status("bot_a", True, reason="пауза", updated_by=1)
@@ -238,6 +244,12 @@ class TestPaymentGate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(answers), 1)
         self.assertFalse(answers[0].ok)
         self.assertEqual(answers[0].error_message, PRE_CHECKOUT_INTERNAL_ERROR)
+        failures = await self.storage.engine.run(
+            lambda conn: conn.execute(
+                "SELECT COUNT(*) FROM chassis_events WHERE event_type = 'payment_error'"
+            ).fetchone()[0]
+        )
+        self.assertEqual(failures, 1)
 
     async def test_broken_payload_without_user_alerts_and_skips_receipt(self) -> None:
         payment = SuccessfulPayment(

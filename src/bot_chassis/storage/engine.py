@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TypeVar
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+SCHEMA_VERSION = "0.3"
 
 T = TypeVar("T")
 
@@ -141,6 +143,15 @@ class StorageEngine:
                     WHERE ticket_status = 'answered'
                     """
                 )
+            if _table_exists(conn, "review_submissions"):
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE review_submissions ADD COLUMN moderation_claim_token TEXT",
+                )
+                _add_column_if_missing(
+                    conn,
+                    "ALTER TABLE review_submissions ADD COLUMN moderation_claimed_at TEXT",
+                )
             if _table_exists(conn, "user_bot_statuses"):
                 lifecycle_columns = {
                     row[1] for row in conn.execute("PRAGMA table_info(user_bot_statuses)")
@@ -164,18 +175,31 @@ class StorageEngine:
         finally:
             conn.close()
 
-    async def backup(self, dest_path: str) -> None:
+    async def backup(
+        self,
+        dest_path: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
         """Copy the database file. Must not run inside BEGIN IMMEDIATE."""
         async with self._lock:
-            await asyncio.to_thread(self._backup_sync, dest_path)
+            await asyncio.to_thread(self._backup_sync, dest_path, timeout_seconds)
 
-    def _backup_sync(self, dest_path: str) -> None:
+    def _backup_sync(self, dest_path: str, timeout_seconds: float | None) -> None:
         Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
-        source = self._connect()
+        timeout = 10.0 if timeout_seconds is None else max(0.001, timeout_seconds)
+        deadline = time.monotonic() + timeout if timeout_seconds is not None else None
+        source = sqlite3.connect(self._db_path, timeout=min(10.0, timeout))
+        if self._db_path != ":memory:":
+            source.execute(f"PRAGMA busy_timeout = {max(1, int(min(10.0, timeout) * 1000))}")
         try:
             target = sqlite3.connect(dest_path)
             try:
-                source.backup(target)
+                def _progress(_status: int, _remaining: int, _total: int) -> None:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError("sqlite backup deadline exceeded")
+
+                source.backup(target, pages=256, progress=_progress, sleep=0.05)
             finally:
                 target.close()
         finally:

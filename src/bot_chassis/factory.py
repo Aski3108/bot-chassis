@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Awaitable, Callable, Sequence
 
 from aiogram import Bot, Dispatcher, Router
@@ -30,12 +30,13 @@ from .payments.router import create_payments_router
 from .ports.access import AccessPort, DefaultAccessAdapter
 from .ports.admin_extra import ExtraAdminActions
 from .ports.cabinet import CabinetSlotsProviderPort, DefaultCabinetSlotsAdapter, build_cabinet_renderer
-from .ports.donations import resolve_donation_items
+from .ports.donations import merge_payment_skus, resolve_donation_items
 from .ports.payments import SkuVoucherConsumerPort, VoucherManagerPort, DefaultVoucherManagerAdapter
 from .ports.referrals import DefaultReferralAdapter, ReferralPort
 from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
 from .reviews import create_reviews_router
 from .router import create_button_chassis_router
+from .scheduler import BackupScheduler, ReportScheduler, register_backup_scheduler, register_report_scheduler
 from .storage import Storage, create_storage
 from .storage.sqlite_support_thread_store import SqliteSupportThreadStore
 from .support_bridge import SupportThreadStore
@@ -102,6 +103,9 @@ async def create_complete_chassis(
     donation_catalog=None,
     donation_hint: str | None = None,
     review_sink=None,
+    backup_policy=None,
+    reporting_policy=None,
+    process_control=None,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -138,7 +142,15 @@ async def create_complete_chassis(
     )
 
     resolved_pending = pending_store or PendingInputStore()
-    donation_items = resolve_donation_items(config, donation_catalog)
+    donation_items = (
+        resolve_donation_items(config, donation_catalog)
+        if config.enable_payments
+        else ()
+    )
+    payment_config = replace(
+        config,
+        skus=merge_payment_skus(config.skus, donation_items),
+    )
 
     if config.enable_admin:
         dp.include_router(
@@ -151,11 +163,14 @@ async def create_complete_chassis(
                 extra_user_dossier_rows=extra_user_dossier_rows,
                 bot_display_name_provider=bot_display_name_provider,
                 pending_store=resolved_pending,
+                backup_policy=backup_policy,
+                reporting_policy=reporting_policy,
+                process_control=process_control,
             )
         )
     if config.enable_payments:
         dp.include_router(
-            create_payments_router(config.bot_id, storage, config, voucher_consumer)
+            create_payments_router(config.bot_id, storage, payment_config, voucher_consumer)
         )
     dp.include_router(
         create_localization_router(
@@ -270,6 +285,32 @@ async def create_complete_chassis(
                     domain_labels=extract_domain_labels(domain_rows),
                 )
             )
+
+    if backup_policy is not None:
+        register_backup_scheduler(
+            dp,
+            BackupScheduler(
+                bot=bot,
+                config=config,
+                storage=storage,
+                policy=backup_policy,
+                origin_bot_id=resolved_origin(config),
+                telegram_bot_id=int(bot.id),
+            ),
+        )
+    if reporting_policy is not None:
+        register_report_scheduler(
+            dp,
+            ReportScheduler(
+                bot=bot,
+                config=config,
+                storage=storage,
+                policy=reporting_policy,
+                origin_bot_id=resolved_origin(config),
+                telegram_bot_id=int(bot.id),
+                donation_sku_codes=tuple(item.sku_code for item in donation_items),
+            ),
+        )
 
     return CompleteChassis(
         dp=dp,

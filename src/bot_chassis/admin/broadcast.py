@@ -9,13 +9,20 @@ from dataclasses import dataclass
 from aiogram import F, Router
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import Filter
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InaccessibleMessage,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from loguru import logger
 
 from ..config import BotChassisConfig
 from ..storage import Storage
 from ..user_lifecycle import classify_delivery_error, record_delivery_outcome
 from .audit import send_admin_audit
+from .filters import SUPERADMIN_ONLY
 
 CB_BROADCAST = "adm_bcast"
 CB_BROADCAST_GO = "adm_bcast:go"
@@ -48,12 +55,24 @@ def reset_broadcast_sessions() -> None:
     _BROADCAST_LOCK = asyncio.Lock()
 
 
-def register_broadcast(router: Router, bot_id: str, storage: Storage, config: BotChassisConfig, staff: Filter) -> None:
+def register_broadcast(
+    router: Router,
+    bot_id: str,
+    storage: Storage,
+    config: BotChassisConfig,
+    staff: Filter,
+    *,
+    root: Filter,
+    raise_home=None,
+) -> None:
     @router.callback_query(F.data == CB_BROADCAST, staff)
     async def start_broadcast(call: CallbackQuery) -> None:
         actor = call.from_user
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
+            return
+        if not await root(call):
+            await call.answer(SUPERADMIN_ONLY, show_alert=True)
             return
         key = (bot_id, actor.id)
         current = _BROADCAST_SESSIONS.get(key)
@@ -64,6 +83,7 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
 
         cancel_admin_lookup(bot_id, actor.id)
         _BROADCAST_SESSIONS[key] = BroadcastSession(phase="awaiting")
+        await _strip_markup(call)
         await call.bot.send_message(actor.id, BROADCAST_PROMPT)
         await call.answer()
 
@@ -71,6 +91,8 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
     async def capture_broadcast_text(message: Message) -> None:
         actor = message.from_user
         if actor is None or await _is_banned(storage, bot_id, actor.id):
+            return
+        if not await root(message):
             return
         key = (bot_id, actor.id)
         session = _BROADCAST_SESSIONS.get(key)
@@ -80,6 +102,8 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if text == "/cancel":
             _BROADCAST_SESSIONS.pop(key, None)
             await message.answer("Рассылка отменена")
+            if raise_home is not None:
+                await raise_home(message.bot, actor.id, True, int(message.bot.id))
             return
         if not text:
             await message.answer(BROADCAST_PROMPT)
@@ -98,14 +122,27 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
             return
+        if not await root(call):
+            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+            return
         _BROADCAST_SESSIONS.pop((bot_id, actor.id), None)
+        await _strip_markup(call)
         await call.answer("Рассылка отменена")
+        try:
+            await call.bot.send_message(actor.id, "Рассылка отменена")
+        except Exception:
+            logger.exception("Не удалось отправить отмену рассылки")
+        if raise_home is not None:
+            await raise_home(call.bot, actor.id, True, int(call.bot.id))
 
     @router.callback_query(F.data == CB_BROADCAST_GO, staff)
     async def launch_broadcast(call: CallbackQuery) -> None:
         actor = call.from_user
         if actor is None or await _is_banned(storage, bot_id, actor.id):
             await call.answer()
+            return
+        if not await root(call):
+            await call.answer(SUPERADMIN_ONLY, show_alert=True)
             return
         key = (bot_id, actor.id)
         session = _BROADCAST_SESSIONS.get(key)
@@ -114,17 +151,23 @@ def register_broadcast(router: Router, bot_id: str, storage: Storage, config: Bo
             return
         session.phase = "running"
         session.cancel = False
+        await _strip_markup(call)
         await call.answer()
         try:
             await _run_broadcast(call.bot, storage, config, bot_id, actor.id, session)
         finally:
             _BROADCAST_SESSIONS.pop(key, None)
+            if raise_home is not None:
+                await raise_home(call.bot, actor.id, True, int(call.bot.id))
 
     @router.callback_query(F.data == CB_BROADCAST_STOP, staff)
     async def stop_broadcast(call: CallbackQuery) -> None:
         actor = call.from_user
         if actor is None:
             await call.answer()
+            return
+        if not await root(call):
+            await call.answer(SUPERADMIN_ONLY, show_alert=True)
             return
         session = _BROADCAST_SESSIONS.get((bot_id, actor.id))
         if session is None or session.phase != "running":
@@ -144,6 +187,16 @@ class AwaitingBroadcastText(Filter):
             return False
         session = _BROADCAST_SESSIONS.get((self._bot_id, actor.id))
         return session is not None and session.phase == "awaiting"
+
+
+async def _strip_markup(call: CallbackQuery) -> None:
+    message = call.message
+    if message is None or isinstance(message, InaccessibleMessage):
+        return
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        logger.debug("Не удалось снять кнопки предпросмотра рассылки")
 
 
 def _preview_keyboard() -> InlineKeyboardMarkup:

@@ -22,7 +22,7 @@ def register_chassis_middlewares(
 ) -> dict[int, str]:
     """Самый внешний — ErrorAlert. Первый зарегистрированный outer видит Update раньше."""
     cache = {} if locale_cache is None else locale_cache
-    dp.update.outer_middleware(ErrorAlertMiddleware(config))
+    dp.update.outer_middleware(ErrorAlertMiddleware(config, storage))
     dp.update.outer_middleware(ThrottlingMiddleware(config.bot_id, enabled=config.enable_throttling))
     dp.update.outer_middleware(
         UserActivityMiddleware(

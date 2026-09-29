@@ -184,6 +184,17 @@ async def record_delivery_outcome(
     bot=None,
 ) -> None:
     origin = resolved_origin(config)
+    if outcome in {"deleted", "stopped"}:
+        try:
+            await storage.events.record(
+                config.bot_id,
+                "delivery_error",
+                origin_bot_id=origin,
+                telegram_bot_id=telegram_bot_id,
+                details=outcome,
+            )
+        except Exception:
+            logger.exception("Не удалось записать событие ошибки доставки")
     if outcome == "deleted":
         changed = await storage.bot_statuses.mark_deleted(
             config.bot_id, user_id, origin, telegram_bot_id

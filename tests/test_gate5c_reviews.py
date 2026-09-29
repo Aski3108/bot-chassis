@@ -59,11 +59,14 @@ def _user(user_id: int, first_name: str = "N") -> User:
 
 @dataclass
 class _FakeSink:
+    fail_moderation: bool = False
     fail_publish: bool = False
     moderation: list = field(default_factory=list)
     published: list = field(default_factory=list)
 
     async def copy_to_moderation(self, bot, **kwargs):
+        if self.fail_moderation:
+            raise RuntimeError("moderation down")
         self.moderation.append(kwargs)
         sent = await bot.send_message(
             chat_id=-200,
@@ -285,6 +288,68 @@ class TestGate5CReviews(unittest.IsolatedAsyncioTestCase):
         result = await sink.publish(bot, source_chat_id=7, source_message_id=3)
         self.assertEqual(result.url, "https://t.me/example_reviews/88")
         self.assertEqual(result.chat_id, -300)
+
+    async def test_publish_claim_is_atomic_and_blocks_reject(self) -> None:
+        chassis = await self._chassis()
+        await chassis.storage.users.upsert_user("bot_a", 7)
+        await chassis.storage.reviews.create(
+            "bot_a",
+            "review-race",
+            7,
+            origin_bot_id="origin",
+            source_chat_id=7,
+            source_message_id=10,
+            consent_to_publish=True,
+        )
+
+        first = await chassis.storage.reviews.claim_pending("bot_a", "review-race")
+        second = await chassis.storage.reviews.claim_pending("bot_a", "review-race")
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+        self.assertEqual(
+            await chassis.storage.reviews.mark_rejected("bot_a", "review-race"),
+            0,
+        )
+        await chassis.storage.engine.run(
+            lambda conn: conn.execute(
+                """
+                UPDATE review_submissions
+                SET moderation_claimed_at = '2000-01-01 00:00:00'
+                WHERE bot_id = 'bot_a' AND review_id = 'review-race'
+                """
+            )
+        )
+        recovered = await chassis.storage.reviews.claim_pending("bot_a", "review-race")
+        self.assertIsNotNone(recovered)
+        self.assertNotEqual(recovered, first)
+        self.assertEqual(
+            await chassis.storage.reviews.release_claim("bot_a", "review-race", recovered),
+            1,
+        )
+        self.assertEqual(
+            await chassis.storage.reviews.mark_rejected("bot_a", "review-race"),
+            1,
+        )
+
+    async def test_moderation_row_wraps_external_copy(self) -> None:
+        chassis = await self._chassis()
+        self.sink.fail_moderation = True
+        await self._callback(chassis, 7, "core_sup:review", 1)
+        await self._message(chassis, 7, "отзыв", 2)
+        await self._callback(chassis, 7, "core_rev:yes", 3)
+        rows = await chassis.storage.engine.run(
+            lambda conn: conn.execute("SELECT COUNT(*) FROM review_submissions").fetchone()[0]
+        )
+        self.assertEqual(rows, 0)
+        self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.REVIEW_CONSENT))
+
+        self.sink.fail_moderation = False
+        await self._callback(chassis, 7, "core_rev:yes", 4)
+        row = await chassis.storage.engine.run(
+            lambda conn: dict(conn.execute("SELECT * FROM review_submissions").fetchone())
+        )
+        self.assertEqual(row["moderation_chat_id"], -200)
+        self.assertIsNotNone(row["moderation_message_id"])
 
 
 if __name__ == "__main__":

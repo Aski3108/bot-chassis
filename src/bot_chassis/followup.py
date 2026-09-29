@@ -37,8 +37,8 @@ class PendingInput:
     target_user_id: Optional[int] = None
     origin_chat_id: Optional[int] = None
     origin_message_id: Optional[int] = None
-    ticket_id: Optional[str] = None
     created_at: float = field(default_factory=time.time)
+    ticket_id: Optional[str] = None
 
 
 class PendingInputStore:

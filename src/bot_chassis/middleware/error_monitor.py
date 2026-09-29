@@ -10,7 +10,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import TelegramObject, Update
 from loguru import logger
 
-from ..config import BotChassisConfig
+from ..config import BotChassisConfig, resolved_origin
 from ..service_notify import deliver_service_message, resolve_service_destination
 
 _USER_ERROR = "Произошла непредвиденная ошибка.\nМы уже занимаемся этим вопросом."
@@ -18,8 +18,9 @@ _PAYMENT_ERROR = "⚠️ Ошибка при обработке платежа."
 
 
 class ErrorAlertMiddleware(BaseMiddleware):
-    def __init__(self, config: BotChassisConfig) -> None:
+    def __init__(self, config: BotChassisConfig, storage=None) -> None:
         self._config = config
+        self._storage = storage
 
     async def __call__(
         self,
@@ -31,7 +32,18 @@ class ErrorAlertMiddleware(BaseMiddleware):
             return await handler(event, data)
         try:
             return await handler(event, data)
-        except Exception:
+        except Exception as exc:
+            if self._storage is not None:
+                try:
+                    await self._storage.events.record(
+                        self._config.bot_id,
+                        "handler_error",
+                        origin_bot_id=resolved_origin(self._config),
+                        telegram_bot_id=int(data["bot"].id) if data.get("bot") else 0,
+                        details=type(exc).__name__,
+                    )
+                except Exception:
+                    logger.exception("Не удалось записать событие ошибки шасси")
             escaped = html.escape(traceback.format_exc()[-3500:])
             await self._reply_to_user(event)
             await self._alert_service_chat(data, escaped)

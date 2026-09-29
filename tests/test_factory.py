@@ -475,8 +475,9 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             for row in sent.reply_markup.inline_keyboard
             for button in row
         ]
-        self.assertEqual(buttons[-2], ("Grant hours", "adm_ops:grant_hours:16"))
-        self.assertEqual(buttons[-1], ("« Главное меню админки", "adm_home"))
+        self.assertEqual(buttons[-3], ("Grant hours", "adm_ops:grant_hours:16"))
+        self.assertEqual(buttons[-2], ("« Назад", "adm_back"))
+        self.assertEqual(buttons[-1], ("В главное меню", "adm_home"))
 
         panel = Message(
             message_id=50,
@@ -676,14 +677,27 @@ class TestCompleteRunner(unittest.IsolatedAsyncioTestCase):
         config = runner.build_config(
             {
                 "CHASSIS_BOT_ID": "shop",
+                "CHASSIS_ORIGIN_BOT_ID": "shop-origin",
                 "ADMIN_IDS": "10, bad, 11",
                 "SUPPORT_CHAT_ID": "-100",
+                "AUDIT_CHAT_ID": "-200",
+                "CHASSIS_AUDIT_CHAT_ID": "-300",
+                "SUPPORT_THREAD_ID": "11",
+                "AUDIT_THREAD_ID": "12",
+                "OPS_THREAD_ID": "13",
+                "EVENTS_THREAD_ID": "14",
                 "CHASSIS_ENABLE_REFERRALS": "yes",
             }
         )
         self.assertEqual(config.bot_id, "shop")
+        self.assertEqual(config.origin_bot_id, "shop-origin")
         self.assertEqual(config.superadmin_ids, (10, 11))
         self.assertEqual(config.support_chat_id, -100)
+        self.assertEqual(config.audit_chat_id, -200)
+        self.assertEqual(config.support_thread_id, 11)
+        self.assertEqual(config.audit_thread_id, 12)
+        self.assertEqual(config.ops_thread_id, 13)
+        self.assertEqual(config.events_thread_id, 14)
         self.assertTrue(config.enable_referrals)
         self.assertEqual(config.skus[0].stars_price, 1)
         self.assertEqual(config.skus[0].sku_code, "demo")
