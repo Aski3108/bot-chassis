@@ -15,13 +15,43 @@
   **62 passed**, полно **205 passed**; `compileall` и `git diff --check` чистые.
 - Статус: **B6 PASS WITH NOTES**. Узко **106**, полно **216**, frozen **19**;
   `compileall` и `git diff --check` чистые.
-- Два Low B4 после B6 исправлены: XLSX строится из snapshot, stale nightly
-  claim перехватывается с fencing владельца. Проверка исполнителя:
-  Gate 6–8 **20 passed**, полно **218**, frozen **19**. Статус находок:
-  **ИСПРАВЛЕНО — ЖДЁТ ПОВТОРА** в отдельном чате `B4-low-repeat`
-  (этот чат — исполнитель, повтор здесь не независим).
+- Два Low B4 после B6 закрыты независимым `B4-low-repeat`: **PASS WITH
+  NOTES**. Excel snapshot, конкурентный stale-claim, terminal-state protection
+  и fencing владельца доказаны кодом и дополнительными стресс-проверками.
+  Gate 6–8 **20 passed**, полно **218**, frozen **19**; `compileall` и
+  `git diff --check` чистые. Единственная Note — refs охватывают весь landing
+  0.3, а не отдельный маленький diff двух Low.
+- Подготовлен `.agents/AUDIT_0_3_FULL_PROMPT.md`. По решению владельца
+  2026-10-01 отдельный `FULL-0.3-RELEASE` **объединён с B7** пакета `0.3.1`:
+  сквозной аудит один раз по диапазону `v0.2.2 → 0.3.1`. До R1 не запускать.
+- Gate C0 (2026-10-01): control plane выровнен; кодовый
+  `BASE_REF` пакета `0.3.1` = `d3c79cd`.
 - Gate 13 пропущен владельцем 2026-09-29.
-- Tag `v0.3.0` не ставился.
+- Tag `v0.3.0` / `v0.3.1` не ставились.
+
+Параметры состоявшегося повторного аудита двух Low B4:
+
+```text
+AUDIT_BOUNDARY=B4-low-repeat
+TARGET_GATES=два Low B4 после B6 (Excel snapshot + stale nightly claim)
+BASE_REF=c0fa4a3
+HEAD_REF=9c9418f
+```
+
+Параметры запланированного сквозного аудита (после R1, граница B7):
+
+```text
+AUDIT_BOUNDARY=FULL-0.3-RELEASE+0.3.1
+TARGET_GATES=Gate 0–12 + B0–B6 + Low B4 + пакет 0.3.1 (C0–R1)
+BASE_REF=d3c5de8 (tag v0.2.2)
+LANDING_0_3_0=7fe5d93
+CODE_BASE_0_3_1=d3c79cd
+HEAD_REF=после R1 (последний кодовый/релизный SHA пакета 0.3.1)
+CONTROL_PLANE_REF=текущий WORKTREE только как аудит-контекст
+```
+
+Чек-листы: `.agents/AUDIT_0_3_FULL_PROMPT.md` (`0.3.0`) +
+`.agents/AUDIT_0_3_1_PROMPT.md` (`0.3.1`).
 
 Параметры состоявшегося повторного аудита B5:
 
@@ -66,7 +96,8 @@ Gate 5 целиком и отдельно доказал закрытие трё
 | B3 после Gate 5C | BLOCKED | 3 блокера, 2 средних | текущий worktree | PASS WITH NOTES, 169 тестов; заметки затем исправлены, 170 тестов |
 | B4 после Gate 8 | BLOCKED | 3 блокера, 1 средний, 1 низкий | текущий worktree | PASS WITH NOTES; 40 узко, 188 полно; 2 новых Low в техдолге |
 | B5 после Gate 10 | BLOCKED | 3 блокера Gate 9/10 | текущий worktree | PASS WITH NOTES; 62 узко, 205 полно |
-| B6 после Gate 12 | PASS WITH NOTES | 2 унаследованных Low B4 | срез `feat/chassis-0.3` | 106 узко, 216 полно, 19 frozen; Low исправлены; повтор — чат `B4-low-repeat` |
+| B6 после Gate 12 | PASS WITH NOTES | 2 унаследованных Low B4 | срез `feat/chassis-0.3` | 106 узко, 216 полно, 19 frozen; Low исправлены; `B4-low-repeat` PASS WITH NOTES |
+| B4-low-repeat после B6 | PASS WITH NOTES | блокеров нет; Note о широком диапазоне refs | `c0fa4a3..9c9418f` | 20 узко, 218 полно, 19 frozen + 2 ad-hoc stress; оба Low закрыты |
 
 ## Находки и починки
 
@@ -244,8 +275,31 @@ compileall и `git diff --check` чистые.
 
 Проверка исполнителя после исправлений: Gate 6–8 **20 passed**, полный сьют
 **218 passed**, frozen **19 passed**, `compileall` и `git diff --check` чистые.
-Обе находки: **ИСПРАВЛЕНО — ЖДЁТ ПОВТОРА** в отдельном чате `B4-low-repeat`.
-Gate 13 пропущен владельцем. Tag `v0.3.0` не ставился.
+
+### B4-low-repeat — два Low после B6
+
+Независимый вердикт: **PASS WITH NOTES** по `c0fa4a3..9c9418f`.
+
+1. Excel Low закрыт: workbook строится из отдельного SQLite snapshot после
+   освобождения engine-lock и вне `BEGIN IMMEDIATE`. Независимый ad-hoc тест
+   задержал запись workbook и доказал успешную параллельную запись в live DB.
+2. Stale-claim Low закрыт: из семи конкурентных претендентов старый
+   `running`-слот получает один winner; старый owner не завершает новый claim;
+   древние `done` и `failed` не перехватываются. Backup/report используют
+   политику 15 минут по умолчанию; старый repository-вызов совместим.
+
+Повтор аудитора: Gate 6–8 **20 passed**, полный сьют **218 passed**, frozen
+**19 passed**, `compileall` и `git diff --check` чистые. `tests/test_chassis.py`
+и `bot_gateway.py` между refs не менялись; worktree на момент аудита был чист.
+
+Note: заданный диапазон содержит весь landing 0.3 (59 файлов), поэтому не
+является изолированным diff двух Low. Это не блокирует принятие: остальной
+контур ранее прошёл B6, а отдельные механики повтор доказал кодом и тестами.
+
+Обе Low-находки **ЗАКРЫТЫ**. Gate 13 пропущен владельцем. Tag `v0.3.0` не
+ставился. Следующий сквозной контроль — единый B7 после R1
+(`v0.2.2 → 0.3.1`) по `.agents/AUDIT_0_3_FULL_PROMPT.md` и
+`.agents/AUDIT_0_3_1_PROMPT.md`.
 
 ## Правило дальнейшего ведения
 

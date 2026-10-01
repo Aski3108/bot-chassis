@@ -5,6 +5,82 @@
 
 ---
 
+## 2026-10-01 — Gate C0: control plane под 0.3.1; BASE_REF=d3c79cd
+
+**Почему.** На `feat/chassis-0.3` лежали четыре незалогированных коммита
+поддержки после landing `0.3.0`; журналы всё ещё указывали HEAD `9c9418f`.
+Принят план `0.3.1` (UI, навигация, поддержка); C0 выравнивает control plane
+без изменения кода продукта.
+
+**Коммиты `20db9e1..d3c79cd` (уже в истории ветки, ранее не в журнале):**
+- `20db9e1` fix(support): rename request button to write to support —
+  `src/bot_chassis/keyboards.py`
+- `d0b170f` fix(support): keep only cancel on ticket prompt —
+  `keyboards.py`, `router.py`, `tests/test_factory.py`,
+  `tests/test_gate5a_support.py`
+- `5baf6c1` fix(support): close prompt card after ticket sent —
+  `router.py`, `tests/test_gate5a_support.py`
+- `d3c79cd` fix(support): tell user to press menu after ticket —
+  `router.py`, `tests/test_gate5a_support.py`
+
+**Решение отменено.** Коммит `d0b170f` (убрать «Назад» с формы тикета)
+отменён принятым каноном навигации Gate U2: на вложенном экране снова
+«Назад» в корень раздела.
+
+**Решение владельца по «Отмена».** `Отмена` повторно рисует только стартовую
+карточку через `render_start_callback`, но не шлёт второй носитель Reply
+Keyboard; полный `/start` не повторяется.
+
+**BASE_REF для пакета `0.3.1`:** `d3c79cd` — последний кодовый SHA до
+документационного коммита C0. Landing кода `0.3.0` остаётся `7fe5d93`.
+
+**Что сделано в C0.** Журналы и bootstrap на `BASE_REF`; очередь C0–R1/B7;
+трек A7; узкие исключения U1/U2 в `AGENTS.md`/`NEW_CHAT.md`; в Git добавлены
+план `UPGRADE_0_3_1_PLAN.md`, `AUDIT_0_3_1_PROMPT.md`,
+`AUDIT_0_3_FULL_PROMPT.md`, `docs/CHASSIS_SUPPORT_AND_UI_SPEC.md`.
+`FULL-0.3-RELEASE` объединён с B7 на диапазон `v0.2.2 → 0.3.1`. Три py с
+пустым diff восстановлены (`git restore`), отдельный коммит по ним не
+заводился. Пункт спецификации про вычистку `Language / Язык` в PsyBot в этот
+репозиторий не входит.
+
+**Проверка.** `git diff --check` чистый; `git status` только файлы списка C0;
+код `src/` и тесты продукта не менялись.
+
+**Не тронуто.** Код рамы, PsyBot, Chat Listener, Profiling, теги, push.
+
+---
+
+## 2026-09-29 — принят B4-low-repeat и подготовлен полный аудит 0.3
+
+**Почему.** Отдельный независимый чат повторно проверил два Low B4 после B6.
+После их принятия владелец запросил полный, максимально подробный аудит всего
+обновления `0.2.2 → 0.3.0` по исходному плану, журналам решений и реализации.
+
+**B4-low-repeat.** Вердикт **PASS WITH NOTES** по
+`c0fa4a3..9c9418f`. Excel snapshot проверен с искусственной задержкой workbook:
+параллельная запись в live SQLite проходит. Для stale claim семь конкурентов
+дают одного winner; старый owner не завершает новый claim; древние `done` и
+`failed` не перехватываются. Gate 6–8: **20 passed**, полный сьют:
+**218 passed**, frozen: **19 passed**, `compileall` и `git diff --check` чистые.
+Note: диапазон refs включает весь landing 0.3, а не изолированный diff Low.
+Обе Low закрыты.
+
+**Полнота логов.** Исправлены устаревшие handoff-данные: текущий HEAD
+`9c9418f`, landing кода `7fe5d93`, повтор Low принят, следующий контроль —
+полный аудит. Версия `0.3.0`, отсутствие тега, пропуск Gate 13 и hold
+`profiling=6823f30` сохранены явно.
+
+**Новый инструмент.** Добавлен `.agents/AUDIT_0_3_FULL_PROMPT.md`. Он требует
+сквозную матрицу Gate 0–12 и B0–B6, review всего diff `d3c5de8..9c9418f`,
+повтор миграции `0.2.2`, API/frozen-совместимость, права, tenant-изоляцию,
+конкурентные claims, Excel snapshot, backup/report, документы, Git-гигиену,
+полный сьют и независимые ad-hoc stress-проверки. Аудитор ничего не правит.
+
+**Не выполнено.** Сам `FULL-0.3-RELEASE` ещё не запускался. Tag `v0.3.0`,
+merge, push, live smoke, Gate 13 и соседние проекты не тронуты.
+
+---
+
 ## 2026-09-29 — фиксация 0.3: Low B4, пропуск Gate 13, push ветки
 
 **Почему.** Владелец закрыл живой долг двух Low B4, пропустил переименование

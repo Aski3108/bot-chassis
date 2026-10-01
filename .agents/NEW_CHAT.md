@@ -16,8 +16,9 @@
 6. `.agents/TASK_TODO.md` — единственная живая очередь;
 7. `.agents/AUDIT_LOG_0_3.md` — история аудитов, находок и их закрытия;
 8. `.agents/UPGRADE_0_3_PLAN.md` — технические критерии Gate `0.3`;
-9. `docs/CHASSIS.md` — канон рамы, не backlog;
-10. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
+9. `.agents/UPGRADE_0_3_1_PLAN.md` — технические критерии Gate `0.3.1`;
+10. `docs/CHASSIS.md` — канон рамы, не backlog;
+11. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
 
 ## Главные ограничения
 
@@ -25,7 +26,11 @@
 - Из этого корня не менять PsyBot (`C:\Python\tg_psy_tests`) и Chat Listener
   (`C:\Python\tg_chat_listener`).
 - Не переключать checkout Profiling и не ретегать `profiling`.
-- `tests/test_chassis.py` не трогать.
+- `tests/test_chassis.py` заморожен. Единственное исключение `0.3.1`: Gate U1
+  меняет ровно строку 104 (`"ℹ️ Info/FAQ"` → `BTN_INFO_RU`), тестов остаётся 19.
+- Gate U2 `0.3.1` вправе удалить только `cancel_callback` / `cancel_label`
+  из `build_support_prompt_keyboard` (breaking — в CHANGELOG и чек-листе
+  миграции). Другие сигнатуры Button Chassis не ломать.
 - `.env` и секреты не читать.
 - Push, force push, live smoke — только после отдельной команды.
 
@@ -42,20 +47,25 @@ B0–B6 закрыты (`PASS` / `PASS WITH NOTES`). Excel строится из
 владельца. Проверка исполнителя после Low B4: Gate 6–8 **20 passed**, полно
 **218 passed**, frozen **19 passed**. Gate 13 (переименование папки/репозитория)
 пропущен владельцем 2026-09-29 и в `0.3.0` не входит.
-Ветка `feat/chassis-0.3` = `7fe5d93`, запушена в origin.
+Ветка `feat/chassis-0.3`: landing кода `0.3.0` = `7fe5d93`;
+`BASE_REF` для пакета `0.3.1` = `d3c79cd` (последний кодовый SHA до C0).
 Git-тег `v0.3.0` не ставился. Tag `profiling` не двигался.
 
 **Где правда:**
 
 - порядок и статусы Gate: `.agents/TASK_TODO.md`;
-- единственный технический план: `.agents/UPGRADE_0_3_PLAN.md`;
+- технический план `0.3`: `.agents/UPGRADE_0_3_PLAN.md`;
+- единственный технический план `0.3.1`: `.agents/UPGRADE_0_3_1_PLAN.md`;
 - состояние: `.agents/SESSION_STATE.md`;
 - история аудитов и текущий handoff: `.agents/AUDIT_LOG_0_3.md`;
 - канон: `docs/CHASSIS.md`;
 - версии: `VERSION_LOG.md`, `CHANGELOG.md`.
 
-**Следующее действие:** короткий независимый повтор двух Low B4 — только в
-отдельном чате-аудиторе (этот чат исполнитель, повтор здесь не независим).
-Промпт: `.agents/AUDIT_0_3_PROMPT.md`, граница `B4-low-repeat`.
-Tag `v0.3.0` — только по отдельной команде. Gate 13 не открывать.
-PsyBot, Chat Listener и Profiling из этой рамы не монтировать. L3 нет.
+Независимый `B4-low-repeat` завершён: **PASS WITH NOTES**, обе Low закрыты;
+20 узких, 218 полных, 19 frozen и две дополнительные stress-проверки.
+Gate C0 control plane выполнен. `FULL-0.3-RELEASE` объединён с B7.
+
+**Следующее действие:** Gate U1 — после команды владельца «го». После R1
+единый B7 проверит `v0.2.2 → 0.3.1`. Теги и push — только по отдельной
+команде. Gate 13 не открывать. PsyBot, Chat Listener и Profiling из этой
+рамы не монтировать. L3 нет.
