@@ -159,7 +159,7 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
         request_cb = self._callbacks("Можно отправить текст")
         self.assertIn("core_sup:cancel", request_cb)
-        self.assertIn("core_sup:hub", request_cb)
+        self.assertNotIn("core_sup:hub", request_cb)
         self.assertNotIn("buy_sku:donate_50", request_cb)
 
         await self._callback(chassis, 7, "core_sup:hub", 3)

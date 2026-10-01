@@ -303,7 +303,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertNotIn("buy_sku:donate_50", callbacks)
         self.assertIn("core_sup:cancel", callbacks)
-        self.assertIn("core_sup:hub", callbacks)
+        self.assertNotIn("core_sup:hub", callbacks)
         self.assertIn("Psybot", support_card.text)
         self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
 

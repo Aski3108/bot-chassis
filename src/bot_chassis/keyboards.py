@@ -118,7 +118,11 @@ def build_support_prompt_keyboard(
     back_callback: str = CB_SUPPORT_HUB,
     back_label: str = "Назад",
 ) -> InlineKeyboardMarkup:
-    """Карточка ожидания нового обращения: без донатных SKU, с отменой и назад."""
+    """Карточка ожидания нового обращения: без донатных SKU, только отмена.
+
+    back_callback и back_label остаются в сигнатуре для старых вызовов,
+    но на карточке ввода кнопки «Назад» больше нет.
+    """
     rows = [
         [
             InlineKeyboardButton(text=text, url=value)
@@ -129,12 +133,7 @@ def build_support_prompt_keyboard(
         for row in (extra_rows or ())
         if row
     ]
-    rows.append(
-        [
-            InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback),
-            InlineKeyboardButton(text=back_label, callback_data=back_callback),
-        ]
-    )
+    rows.append([InlineKeyboardButton(text=cancel_label, callback_data=cancel_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
