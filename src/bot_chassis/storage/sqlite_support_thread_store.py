@@ -32,6 +32,15 @@ class SupportTicketTarget:
     user_username: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class SupportTicketMessage:
+    direction: str
+    telegram_chat_id: int
+    telegram_message_id: int
+    message_thread_id: int | None
+    created_at: str
+
+
 class SqliteSupportThreadStore:
     """Duck-type replacement for ``SupportThreadStore`` using shared SQLite."""
 
@@ -415,6 +424,45 @@ class SqliteSupportThreadStore:
             return row is not None
         finally:
             conn.close()
+
+    def list_messages(
+        self,
+        ticket_id: str,
+        *,
+        support_chat_id: int,
+        limit: int = 20,
+    ) -> list[SupportTicketMessage]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT direction, telegram_chat_id, telegram_message_id,
+                       message_thread_id, created_at
+                FROM support_ticket_messages
+                WHERE bot_id = ? AND ticket_id = ? AND telegram_chat_id = ?
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (self._tenant_bot_id, ticket_id, support_chat_id, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        messages = [
+            SupportTicketMessage(
+                direction=str(row["direction"]),
+                telegram_chat_id=int(row["telegram_chat_id"]),
+                telegram_message_id=int(row["telegram_message_id"]),
+                message_thread_id=(
+                    int(row["message_thread_id"])
+                    if row["message_thread_id"] is not None
+                    else None
+                ),
+                created_at=str(row["created_at"]),
+            )
+            for row in rows
+        ]
+        messages.reverse()
+        return messages
 
     def _row_to_target(self, row: sqlite3.Row | None) -> Optional[SupportTicketTarget]:
         if not row:

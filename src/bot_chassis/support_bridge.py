@@ -20,14 +20,17 @@ import json
 import os
 import uuid
 from html import escape
-from typing import Optional
+from typing import Optional, Sequence
 from aiogram import Bot, types
 from aiogram.exceptions import TelegramForbiddenError
 from loguru import logger
 
 from .keyboards import build_operator_ticket_keyboard, build_user_ticket_reply_keyboard
 from .service_notify import thread_kwargs
-from .storage.sqlite_support_thread_store import TicketLimitExceeded
+from .storage.sqlite_support_thread_store import (
+    SupportTicketMessage,
+    TicketLimitExceeded,
+)
 
 DEFAULT_SUPPORT_PERSISTENCE_PATH = os.path.join("temp", "support_threads.json")
 _MISSING_THREAD_ID = object()
@@ -174,6 +177,78 @@ def _register_accepts_author_kwargs(register_fn: object) -> bool:
     if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
         return True
     return "full_name" in params and "username" in params
+
+
+def _support_message_link(
+    telegram_chat_id: int,
+    telegram_message_id: int,
+    message_thread_id: int | None,
+) -> str:
+    chat_key = str(telegram_chat_id)
+    if not chat_key.startswith("-100"):
+        return "недоступно"
+    internal = chat_key[4:]
+    if message_thread_id is not None:
+        url = f"https://t.me/c/{internal}/{message_thread_id}/{telegram_message_id}"
+    else:
+        url = f"https://t.me/c/{internal}/{telegram_message_id}"
+    return f'<a href="{url}">{url}</a>'
+
+
+def support_history_text(
+    ticket_id: str,
+    messages: Sequence[SupportTicketMessage],
+) -> str:
+    """Чистый текстовый отчёт по метаданным тикета; тексты сообщений не подставляются."""
+    if not messages:
+        return "История пуста"
+    arrows = {
+        "user_to_support": "⬅️",
+        "support_to_user": "➡️",
+    }
+    lines = [
+        "📜 <b>История обращения</b>",
+        f"<b>Тикет:</b> <code>{escape(ticket_id)}</code>",
+        f"<b>Сообщений:</b> {len(messages)}",
+        "",
+    ]
+    for item in messages:
+        arrow = arrows.get(item.direction, "•")
+        link = _support_message_link(
+            item.telegram_chat_id,
+            item.telegram_message_id,
+            item.message_thread_id,
+        )
+        lines.append(f"{item.created_at} UTC {arrow} {link}")
+    return "\n".join(lines)
+
+
+async def send_support_history(
+    bot: Bot,
+    thread_store: object,
+    ticket_id: str,
+) -> bool:
+    """Отправляет историю новым сообщением; карточку тикета не редактирует."""
+    get_ticket = getattr(thread_store, "get_ticket", None)
+    list_messages = getattr(thread_store, "list_messages", None)
+    header_message_id = getattr(thread_store, "header_message_id", None)
+    if not callable(get_ticket) or not callable(list_messages) or not callable(header_message_id):
+        return False
+    ticket = get_ticket(ticket_id)
+    header_id = header_message_id(ticket_id)
+    if ticket is None or header_id is None or not ticket.support_chat_id:
+        return False
+    messages = list_messages(ticket_id, support_chat_id=ticket.support_chat_id)
+    text = support_history_text(ticket_id, messages)
+    topic = thread_kwargs(ticket.message_thread_id)
+    await bot.send_message(
+        chat_id=ticket.support_chat_id,
+        text=text,
+        parse_mode="HTML",
+        reply_to_message_id=header_id,
+        **topic,
+    )
+    return True
 
 
 def operator_card_text(

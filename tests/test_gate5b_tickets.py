@@ -8,9 +8,16 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
+from bot_chassis.contracts import (
+    CB_SUPPORT_HISTORY_PREFIX,
+    CB_SUPPORT_TICKET_CLOSE_PREFIX,
+    CB_SUPPORT_TICKET_REOPEN_PREFIX,
+)
+from bot_chassis.keyboards import build_operator_ticket_keyboard
 from bot_chassis.storage.engine import StorageEngine
 from bot_chassis.storage.sqlite_support_thread_store import (
     SqliteSupportThreadStore,
+    SupportTicketMessage,
     TicketLimitExceeded,
 )
 from bot_chassis.support_bridge import (
@@ -21,8 +28,10 @@ from bot_chassis.support_bridge import (
     deliver_support_reply_to_user,
     operator_card_text,
     refresh_operator_card,
+    send_support_history,
     send_user_followup_to_support,
     send_user_report_to_support,
+    support_history_text,
 )
 
 _DEFAULT_HEADER = "💬 <b>Ответ службы поддержки:</b>"
@@ -786,6 +795,171 @@ class TestGate5BTickets(unittest.IsolatedAsyncioTestCase):
             recorded = _recorded_user_message_ids(self.db_path, ticket_id, user_id)
             self.assertIn(delivered_msg_id, recorded)
             self.assertTrue(self.store.message_recorded(-100, admin_id))
+
+    def test_history_button_present_in_both_states(self) -> None:
+        ticket_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        open_kb = build_operator_ticket_keyboard(ticket_id, closed=False)
+        closed_kb = build_operator_ticket_keyboard(ticket_id, closed=True)
+        self.assertEqual(len(open_kb.inline_keyboard), 2)
+        self.assertEqual(len(closed_kb.inline_keyboard), 2)
+        self.assertEqual(
+            open_kb.inline_keyboard[0][0].callback_data,
+            f"{CB_SUPPORT_TICKET_CLOSE_PREFIX}{ticket_id}",
+        )
+        self.assertEqual(
+            closed_kb.inline_keyboard[0][0].callback_data,
+            f"{CB_SUPPORT_TICKET_REOPEN_PREFIX}{ticket_id}",
+        )
+        for markup in (open_kb, closed_kb):
+            history = markup.inline_keyboard[1][0]
+            self.assertEqual(history.text, "📜 История диалога")
+            self.assertEqual(
+                history.callback_data,
+                f"{CB_SUPPORT_HISTORY_PREFIX}{ticket_id}",
+            )
+            self.assertLessEqual(len(history.callback_data.encode("utf-8")), 64)
+
+    async def test_history_lists_messages_in_chronological_order(self) -> None:
+        self.store.register(-100123, 7, 10, 11, ticket_id="hist-chrono", message_thread_id=5)
+        self.store.record_message(
+            "hist-chrono",
+            direction="support_to_user",
+            telegram_chat_id=-100123,
+            telegram_message_id=20,
+            message_thread_id=5,
+        )
+        self.store.record_message(
+            "hist-chrono",
+            direction="user_to_support",
+            telegram_chat_id=-100123,
+            telegram_message_id=21,
+            message_thread_id=5,
+        )
+        listed = self.store.list_messages("hist-chrono", support_chat_id=-100123)
+        self.assertEqual(
+            [item.telegram_message_id for item in listed],
+            [11, 20, 21],
+        )
+        text = support_history_text("hist-chrono", listed)
+        pos_first = text.index("/5/11")
+        pos_second = text.index("/5/20")
+        pos_third = text.index("/5/21")
+        self.assertLess(pos_first, pos_second)
+        self.assertLess(pos_second, pos_third)
+
+    async def test_history_shows_one_row_per_dialog_turn(self) -> None:
+        self.store.register(-100123, 7, 10, 11, ticket_id="hist-one", message_thread_id=5)
+        self.store.record_message(
+            "hist-one",
+            direction="user_to_support",
+            telegram_chat_id=7,
+            telegram_message_id=50,
+            message_thread_id=None,
+        )
+        self.store.record_message(
+            "hist-one",
+            direction="support_to_user",
+            telegram_chat_id=-100123,
+            telegram_message_id=30,
+            message_thread_id=5,
+        )
+        self.store.record_message(
+            "hist-one",
+            direction="support_to_user",
+            telegram_chat_id=7,
+            telegram_message_id=100,
+            message_thread_id=None,
+        )
+        listed = self.store.list_messages("hist-one", support_chat_id=-100123)
+        self.assertEqual(
+            [(item.direction, item.telegram_message_id) for item in listed],
+            [("user_to_support", 11), ("support_to_user", 30)],
+        )
+        self.assertTrue(all(item.telegram_chat_id == -100123 for item in listed))
+
+    async def test_history_limit_counts_dialog_turns(self) -> None:
+        ticket_id = "hist-limit"
+        support_chat = -100999
+        self.store.register(support_chat, 7, 10, 11, ticket_id=ticket_id)
+        for message_id in range(12, 22):
+            self.store.record_message(
+                ticket_id,
+                direction="support_to_user",
+                telegram_chat_id=support_chat,
+                telegram_message_id=message_id,
+            )
+        # Force identical created_at so order is determined by rowid.
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE support_ticket_messages SET created_at = ? WHERE ticket_id = ?",
+                ("2026-01-01 00:00:00", ticket_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        listed = self.store.list_messages(ticket_id, support_chat_id=support_chat, limit=5)
+        self.assertEqual(len(listed), 5)
+        self.assertEqual(
+            [item.telegram_message_id for item in listed],
+            [17, 18, 19, 20, 21],
+        )
+
+    def test_history_builds_supergroup_links_with_topic(self) -> None:
+        with_topic = SupportTicketMessage(
+            direction="user_to_support",
+            telegram_chat_id=-1001234567890,
+            telegram_message_id=42,
+            message_thread_id=7,
+            created_at="2026-01-02 03:04:05",
+        )
+        without_topic = SupportTicketMessage(
+            direction="support_to_user",
+            telegram_chat_id=-1001234567890,
+            telegram_message_id=43,
+            message_thread_id=None,
+            created_at="2026-01-02 03:05:06",
+        )
+        private_leak = SupportTicketMessage(
+            direction="user_to_support",
+            telegram_chat_id=7,
+            telegram_message_id=99,
+            message_thread_id=None,
+            created_at="2026-01-02 03:06:07",
+        )
+        text = support_history_text("tid-1", [with_topic, without_topic, private_leak])
+        self.assertIn("2026-01-02 03:04:05 UTC ⬅️", text)
+        self.assertIn("https://t.me/c/1234567890/7/42", text)
+        self.assertIn("2026-01-02 03:05:06 UTC ➡️", text)
+        self.assertIn("https://t.me/c/1234567890/43", text)
+        self.assertIn("2026-01-02 03:06:07 UTC ⬅️ недоступно", text)
+        self.assertNotIn("t.me/c/7/", text)
+        self.assertIn("<b>Тикет:</b> <code>tid-1</code>", text)
+        self.assertIn("<b>Сообщений:</b> 3", text)
+
+    def test_history_on_empty_ticket(self) -> None:
+        self.assertEqual(support_history_text("empty", []), "История пуста")
+
+    async def test_history_does_not_edit_ticket_card(self) -> None:
+        support_chat = -100555
+        self.store.register(
+            support_chat, 7, 10, 11, ticket_id="hist-edit", message_thread_id=3
+        )
+        bot = _Bot(101)
+        ok = await send_support_history(bot, self.store, "hist-edit")
+        self.assertTrue(ok)
+        edits = [
+            item for item in bot.sent
+            if item[0] == "edit" and item[1] == support_chat
+        ]
+        self.assertEqual(edits, [])
+        sends = [item for item in bot.sent if item[0] == "send" and item[1] == support_chat]
+        self.assertEqual(len(sends), 1)
+        self.assertIn("История обращения", sends[0][2])
+        kwargs = sends[0][4]
+        self.assertEqual(kwargs.get("reply_to_message_id"), 10)
+        self.assertEqual(kwargs.get("message_thread_id"), 3)
+        self.assertIsNone(sends[0][3])
 
 
 class TestComposeSupportReply(unittest.TestCase):

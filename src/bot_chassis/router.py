@@ -40,6 +40,7 @@ from .contracts import (
     CB_NAV_CANCEL,
     CB_SUPPORT_TICKET_CLOSE_PREFIX,
     CB_SUPPORT_TICKET_REOPEN_PREFIX,
+    CB_SUPPORT_HISTORY_PREFIX,
     CB_SUPPORT_USER_REPLY_PREFIX,
 )
 from .keyboards import (
@@ -60,6 +61,7 @@ from .support_bridge import (
     send_user_followup_to_support,
     deliver_support_reply_to_user,
     refresh_operator_card,
+    send_support_history,
     store_supports_continuation,
 )
 from .storage.sqlite_support_thread_store import TicketLimitExceeded
@@ -591,6 +593,20 @@ def create_button_chassis_router(
                 return
             await query.answer("Обращение открыто снова")
             await refresh_operator_card(query.bot, threads, ticket_id, project_label)
+
+        @router.callback_query(F.data.startswith(CB_SUPPORT_HISTORY_PREFIX))
+        async def handle_support_ticket_history(query: types.CallbackQuery):
+            if not store_supports_continuation(threads):
+                await query.answer()
+                return
+            ticket_id = (query.data or "")[len(CB_SUPPORT_HISTORY_PREFIX):]
+            get_ticket = getattr(threads, "get_ticket", None)
+            ticket = get_ticket(ticket_id) if callable(get_ticket) else None
+            if ticket is None:
+                await query.answer("Обращение не найдено", show_alert=True)
+                return
+            await query.answer()
+            await send_support_history(query.bot, threads, ticket_id)
 
     # ----------------------------------------------------------------------
     # 5. ОБЩИЕ ИНЛАЙН-ОБРАБОТЧИКИ

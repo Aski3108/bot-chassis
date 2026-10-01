@@ -24,6 +24,7 @@ from .contracts import (
     CB_SUPPORT_HUB,
     CB_SUPPORT_TICKET_CLOSE_PREFIX,
     CB_SUPPORT_TICKET_REOPEN_PREFIX,
+    CB_SUPPORT_HISTORY_PREFIX,
     CB_SUPPORT_USER_REPLY_PREFIX,
     CB_REVIEW_CONSENT_YES,
     CB_REVIEW_CONSENT_NO,
@@ -199,6 +200,12 @@ def build_operator_ticket_keyboard(ticket_id: str, *, closed: bool) -> InlineKey
                 callback_data=f"{CB_SUPPORT_TICKET_CLOSE_PREFIX}{ticket_id}",
             )
         ]]
+    rows.append([
+        InlineKeyboardButton(
+            text="📜 История диалога",
+            callback_data=f"{CB_SUPPORT_HISTORY_PREFIX}{ticket_id}",
+        )
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
