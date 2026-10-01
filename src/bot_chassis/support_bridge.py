@@ -15,6 +15,7 @@
 """
 
 from __future__ import annotations
+import inspect
 import json
 import os
 import uuid
@@ -102,9 +103,12 @@ class SupportThreadStore:
         copied_msg_id: Optional[int] = None,
         ticket_id: Optional[str] = None,
         message_thread_id: Optional[int] = None,
+        *,
+        full_name: str | None = None,
+        username: str | None = None,
     ) -> None:
         """Связывает оба сообщения в админском чате с ID пользователя."""
-        del ticket_id, message_thread_id
+        del ticket_id, message_thread_id, full_name, username
         self._threads[(chat_id, header_msg_id)] = user_id
         if copied_msg_id:
             self._threads[(chat_id, copied_msg_id)] = user_id
@@ -128,19 +132,43 @@ def store_supports_continuation(thread_store: object) -> bool:
     return bool(getattr(thread_store, "supports_continuation", False))
 
 
-def operator_card_text(project_label: str, user_id: int, status: str) -> str:
+def _register_accepts_author_kwargs(register_fn: object) -> bool:
+    try:
+        signature = inspect.signature(register_fn)
+    except (TypeError, ValueError):
+        return False
+    params = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return True
+    return "full_name" in params and "username" in params
+
+
+def operator_card_text(
+    project_label: str,
+    user_id: int,
+    status: str,
+    *,
+    full_name: str | None = None,
+    username: str | None = None,
+) -> str:
     labels = {
         "open": "📩 Открыто",
         "in_progress": "🔄 В работе",
         "closed": "✅ Обращение обслужено",
     }
     status_line = labels.get(status, status)
-    return (
-        f"📩 <b>Обращение в поддержку</b>\n"
-        f"<b>Проект:</b> {escape(project_label)}\n"
-        f"<b>User ID:</b> <code>{user_id}</code>\n"
-        f"<b>Статус:</b> {status_line}"
-    )
+    lines = [
+        "📩 <b>Обращение в поддержку</b>",
+        f"<b>Проект:</b> {escape(project_label)}",
+    ]
+    if full_name or username:
+        display_name = escape(full_name) if full_name else "Пользователь"
+        display_username = f"@{username}" if username else "нет username"
+        lines.append(f"<b>От:</b> {display_name} ({display_username})")
+    lines.append(f"<b>User ID:</b> <code>{user_id}</code>")
+    lines.append("")
+    lines.append(f"<b>Статус:</b> {status_line}")
+    return "\n".join(lines)
 
 
 async def refresh_operator_card(
@@ -165,7 +193,13 @@ async def refresh_operator_card(
         await bot.edit_message_text(
             chat_id=ticket.support_chat_id,
             message_id=header_id,
-            text=operator_card_text(project_label, ticket.user_id, ticket.ticket_status),
+            text=operator_card_text(
+                project_label,
+                ticket.user_id,
+                ticket.ticket_status,
+                full_name=ticket.user_full_name,
+                username=ticket.user_username,
+            ),
             reply_markup=markup,
             parse_mode="HTML",
         )
@@ -198,7 +232,8 @@ async def send_user_report_to_support(
         return None
 
     username_str = f"@{user.username}" if (user and user.username) else "нет username"
-    full_name = escape(user.full_name if user else "Пользователь")
+    raw_full_name = user.full_name if user else None
+    full_name = escape(raw_full_name or "Пользователь")
     ticket_id = str(uuid.uuid4())
     continuable = store_supports_continuation(thread_store)
 
@@ -232,15 +267,19 @@ async def send_user_report_to_support(
         )
 
         # 3. Регистрируем ОБА сообщения по ключу (chat_id, message_id)
+        register_kwargs = {
+            "chat_id": support_chat_id,
+            "user_id": user_id,
+            "header_msg_id": header_msg.message_id,
+            "copied_msg_id": copied_msg.message_id,
+            "ticket_id": ticket_id,
+            "message_thread_id": message_thread_id,
+        }
+        if _register_accepts_author_kwargs(thread_store.register):
+            register_kwargs["full_name"] = raw_full_name
+            register_kwargs["username"] = user.username if user else None
         try:
-            thread_store.register(
-                chat_id=support_chat_id,
-                user_id=user_id,
-                header_msg_id=header_msg.message_id,
-                copied_msg_id=copied_msg.message_id,
-                ticket_id=ticket_id,
-                message_thread_id=message_thread_id,
-            )
+            thread_store.register(**register_kwargs)
         except TicketLimitExceeded:
             for message_id in (copied_msg.message_id, header_msg.message_id):
                 try:

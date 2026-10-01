@@ -28,6 +28,8 @@ class SupportTicketTarget:
     support_chat_id: int = 0
     message_thread_id: int | None = None
     operator_id: int | None = None
+    user_full_name: str | None = None
+    user_username: str | None = None
 
 
 class SqliteSupportThreadStore:
@@ -74,8 +76,14 @@ class SqliteSupportThreadStore:
         copied_msg_id: Optional[int] = None,
         ticket_id: Optional[str] = None,
         message_thread_id: Optional[int] = None,
+        *,
+        full_name: str | None = None,
+        username: str | None = None,
     ) -> str:
         resolved_ticket_id = ticket_id or str(uuid.uuid4())
+        stored_username = (
+            username.lstrip("@") or None if username is not None else None
+        )
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -100,6 +108,8 @@ class SqliteSupportThreadStore:
                 message_role="header",
                 ticket_status="open",
                 message_thread_id=message_thread_id,
+                full_name=full_name,
+                username=stored_username,
             )
             if copied_msg_id is not None:
                 self._insert_message(
@@ -111,6 +121,8 @@ class SqliteSupportThreadStore:
                     message_role="copy",
                     ticket_status="open",
                     message_thread_id=message_thread_id,
+                    full_name=full_name,
+                    username=stored_username,
                 )
                 self._record_message(
                     conn,
@@ -166,7 +178,8 @@ class SqliteSupportThreadStore:
             row = conn.execute(
                 """
                 SELECT user_id, ticket_id, origin_bot_id, origin_telegram_bot_id,
-                       ticket_status, support_chat_id, message_thread_id, operator_id
+                       ticket_status, support_chat_id, message_thread_id, operator_id,
+                       user_full_name, user_username
                 FROM support_threads
                 WHERE bot_id = ? AND support_chat_id = ? AND support_message_id = ?
                 """,
@@ -182,7 +195,8 @@ class SqliteSupportThreadStore:
             row = conn.execute(
                 """
                 SELECT user_id, ticket_id, origin_bot_id, origin_telegram_bot_id,
-                       ticket_status, support_chat_id, message_thread_id, operator_id
+                       ticket_status, support_chat_id, message_thread_id, operator_id,
+                       user_full_name, user_username
                 FROM support_threads
                 WHERE bot_id = ? AND ticket_id = ? AND message_role = 'header'
                 LIMIT 1
@@ -344,6 +358,8 @@ class SqliteSupportThreadStore:
                 message_thread_id=message_thread_id
                 if message_thread_id is not None
                 else ticket.message_thread_id,
+                full_name=ticket.user_full_name,
+                username=ticket.user_username,
             )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -405,6 +421,8 @@ class SqliteSupportThreadStore:
             return None
         thread_raw = row["message_thread_id"]
         operator_raw = row["operator_id"]
+        full_name_raw = row["user_full_name"]
+        username_raw = row["user_username"]
         return SupportTicketTarget(
             user_id=int(row["user_id"]),
             ticket_id=str(row["ticket_id"]),
@@ -414,6 +432,8 @@ class SqliteSupportThreadStore:
             support_chat_id=int(row["support_chat_id"]),
             message_thread_id=int(thread_raw) if thread_raw is not None else None,
             operator_id=int(operator_raw) if operator_raw is not None else None,
+            user_full_name=str(full_name_raw) if full_name_raw else None,
+            user_username=str(username_raw) if username_raw else None,
         )
 
     def _count_active_headers(self, conn: sqlite3.Connection, user_id: int) -> int:
@@ -440,14 +460,17 @@ class SqliteSupportThreadStore:
         message_role: str,
         ticket_status: str,
         message_thread_id: int | None,
+        full_name: str | None = None,
+        username: str | None = None,
     ) -> None:
         conn.execute(
             """
             INSERT INTO support_threads (
                 bot_id, support_chat_id, support_message_id, user_id,
                 origin_bot_id, origin_telegram_bot_id, ticket_id,
-                message_role, ticket_status, message_thread_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                message_role, ticket_status, message_thread_id,
+                user_full_name, user_username, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._tenant_bot_id,
@@ -460,6 +483,8 @@ class SqliteSupportThreadStore:
                 message_role,
                 ticket_status,
                 message_thread_id,
+                full_name,
+                username,
                 utc_now(),
             ),
         )

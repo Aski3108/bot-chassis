@@ -16,6 +16,8 @@ from bot_chassis.storage.sqlite_support_thread_store import (
 from bot_chassis.support_bridge import (
     SupportThreadStore,
     deliver_support_reply_to_user,
+    operator_card_text,
+    refresh_operator_card,
     send_user_followup_to_support,
     send_user_report_to_support,
 )
@@ -333,6 +335,182 @@ class TestGate5BTickets(unittest.IsolatedAsyncioTestCase):
             "missing",
         )
         self.assertIsNone(follow)
+
+    async def test_operator_card_keeps_author_in_all_statuses(self) -> None:
+        bot = _Bot(101)
+        user_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=7, username="ann", full_name="Anna Test"),
+            chat=SimpleNamespace(id=7),
+            message_id=50,
+        )
+        copied = await send_user_report_to_support(
+            bot, -100, user_message, self.store, project_label="PsyBot"
+        )
+        self.assertIsNotNone(copied)
+        ticket = self.store.resolve_ticket(-100, 100)
+        self.assertIsNotNone(ticket)
+        ticket_id = ticket.ticket_id
+
+        open_card = operator_card_text(
+            "PsyBot",
+            7,
+            "open",
+            full_name=ticket.user_full_name,
+            username=ticket.user_username,
+        )
+        self.assertIn("<b>От:</b>", open_card)
+        self.assertIn("Anna Test", open_card)
+        self.assertIn("@ann", open_card)
+
+        self.store.close_ticket(ticket_id)
+        await refresh_operator_card(bot, self.store, ticket_id, "PsyBot")
+        closed_edits = [item[2] for item in bot.sent if item[0] == "edit"]
+        self.assertTrue(closed_edits)
+        self.assertIn("<b>От:</b>", closed_edits[-1])
+        self.assertIn("Anna Test", closed_edits[-1])
+        self.assertIn("@ann", closed_edits[-1])
+        self.assertIn("обслужено", closed_edits[-1])
+
+        self.store.reopen_ticket(ticket_id)
+        await refresh_operator_card(bot, self.store, ticket_id, "PsyBot")
+        reopen_edits = [item[2] for item in bot.sent if item[0] == "edit"]
+        self.assertIn("<b>От:</b>", reopen_edits[-1])
+        self.assertIn("Anna Test", reopen_edits[-1])
+        self.assertIn("@ann", reopen_edits[-1])
+        self.assertIn("В работе", reopen_edits[-1])
+
+    async def test_operator_card_without_username(self) -> None:
+        bot = _Bot(101)
+        user_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=7, username=None, full_name="No Nick"),
+            chat=SimpleNamespace(id=7),
+            message_id=50,
+        )
+        copied = await send_user_report_to_support(
+            bot, -100, user_message, self.store, project_label="PsyBot"
+        )
+        self.assertIsNotNone(copied)
+        ticket = self.store.get_ticket(self.store.resolve_ticket(-100, 100).ticket_id)
+        card = operator_card_text(
+            "PsyBot",
+            ticket.user_id,
+            ticket.ticket_status,
+            full_name=ticket.user_full_name,
+            username=ticket.user_username,
+        )
+        self.assertIn("нет username", card)
+        self.assertIn("No Nick", card)
+        header = next(item[2] for item in bot.sent if item[0] == "send")
+        self.assertIn("нет username", header)
+
+    async def test_author_name_is_stored_raw_and_escaped_once(self) -> None:
+        bot = _Bot(101)
+        raw_name = "A & B <C>"
+        user_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=7, username="amp", full_name=raw_name),
+            chat=SimpleNamespace(id=7),
+            message_id=50,
+        )
+        copied = await send_user_report_to_support(
+            bot, -100, user_message, self.store, project_label="PsyBot"
+        )
+        self.assertIsNotNone(copied)
+        ticket = self.store.resolve_ticket(-100, 100)
+        self.assertEqual(ticket.user_full_name, raw_name)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            stored = conn.execute(
+                "SELECT user_full_name FROM support_threads WHERE ticket_id = ?",
+                (ticket.ticket_id,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(stored, raw_name)
+        self.assertNotIn("&amp;", stored)
+
+        header = next(item[2] for item in bot.sent if item[0] == "send")
+        self.assertIn("A &amp; B &lt;C&gt;", header)
+        self.assertNotIn("A &amp;amp; B", header)
+
+        await refresh_operator_card(bot, self.store, ticket.ticket_id, "PsyBot")
+        edited = next(item[2] for item in bot.sent if item[0] == "edit")
+        self.assertIn("A &amp; B &lt;C&gt;", edited)
+        self.assertNotIn("A &amp;amp; B", edited)
+
+    async def test_operator_card_blank_line_before_status(self) -> None:
+        text = operator_card_text(
+            "PsyBot",
+            7,
+            "open",
+            full_name="Ann",
+            username="ann",
+        )
+        self.assertIn("\n\n<b>Статус:</b>", text)
+
+    async def test_legacy_custom_thread_store_without_author_kwargs(self) -> None:
+        calls: list[dict] = []
+
+        class LegacyStore:
+            supports_continuation = False
+            max_active_tickets = 5
+
+            def can_send_ticket(self, user_id: int) -> bool:
+                return True
+
+            def register(
+                self,
+                chat_id: int,
+                user_id: int,
+                header_msg_id: int,
+                copied_msg_id=None,
+                ticket_id=None,
+                message_thread_id=None,
+            ) -> None:
+                calls.append(
+                    {
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "header_msg_id": header_msg_id,
+                        "copied_msg_id": copied_msg_id,
+                        "ticket_id": ticket_id,
+                        "message_thread_id": message_thread_id,
+                    }
+                )
+
+            def mark_answered(self, user_id: int) -> None:
+                return None
+
+        bot = _Bot(1)
+        user_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=7, username="ann", full_name="Ann"),
+            chat=SimpleNamespace(id=7),
+            message_id=50,
+        )
+        copied = await send_user_report_to_support(bot, -100, user_message, LegacyStore())
+        self.assertIsNotNone(copied)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("full_name", calls[0])
+        self.assertNotIn("username", calls[0])
+
+        class ExplodingStore(LegacyStore):
+            def register(
+                self,
+                chat_id: int,
+                user_id: int,
+                header_msg_id: int,
+                copied_msg_id=None,
+                ticket_id=None,
+                message_thread_id=None,
+            ) -> None:
+                calls.append({"boom": True})
+                raise TypeError("internal store failure")
+
+        boom_calls_before = len(calls)
+        bot2 = _Bot(1)
+        result = await send_user_report_to_support(bot2, -100, user_message, ExplodingStore())
+        self.assertIsNone(result)
+        self.assertEqual(len(calls), boom_calls_before + 1)
 
 
 if __name__ == "__main__":

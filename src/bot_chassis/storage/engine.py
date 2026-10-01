@@ -129,6 +129,12 @@ class StorageEngine:
                     conn,
                     "ALTER TABLE support_threads ADD COLUMN closed_at TEXT",
                 )
+                _add_column_if_missing(
+                    conn, "ALTER TABLE support_threads ADD COLUMN user_full_name TEXT"
+                )
+                _add_column_if_missing(
+                    conn, "ALTER TABLE support_threads ADD COLUMN user_username TEXT"
+                )
                 conn.execute(
                     """
                     UPDATE support_threads

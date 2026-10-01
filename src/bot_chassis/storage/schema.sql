@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS support_threads (
     operator_id INTEGER,
     first_answered_at TEXT,
     closed_at TEXT,
+    user_full_name TEXT,
+    user_username TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (bot_id, support_chat_id, support_message_id),

@@ -15,6 +15,7 @@ from bot_chassis.storage import create_storage
 from bot_chassis.storage.engine import StorageEngine, utc_now, parse_utc
 from bot_chassis.storage.repositories.transactions import TransactionsRepository
 from bot_chassis.storage.repositories.users import UsersRepository
+from bot_chassis.storage.sqlite_support_thread_store import SqliteSupportThreadStore
 from bot_chassis.support_bridge import SupportThreadStore, DEFAULT_SUPPORT_PERSISTENCE_PATH
 
 # DDL Этапа 1: нет payment_id / provider и нет тени. Нужен для проверки пересборки.
@@ -598,6 +599,90 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row[0], "backup_user")
         still = await self.storage.users.get_user("bot_a", 42)
         self.assertEqual(still.username, "backup_user")
+
+    async def test_migrate_support_threads_author_columns_from_0_3_0(self) -> None:
+        path = os.path.join(self._tmp.name, "legacy_support_author.db")
+        conn = sqlite3.connect(path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE users (
+                    bot_id TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    language_code TEXT NOT NULL DEFAULT 'ru',
+                    is_banned INTEGER NOT NULL DEFAULT 0,
+                    is_shadow_banned INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (bot_id, user_id)
+                );
+                CREATE TABLE support_threads (
+                    bot_id TEXT NOT NULL,
+                    support_chat_id INTEGER NOT NULL,
+                    support_message_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    origin_bot_id TEXT NOT NULL DEFAULT '',
+                    origin_telegram_bot_id INTEGER NOT NULL DEFAULT 0,
+                    ticket_id TEXT NOT NULL DEFAULT '',
+                    message_role TEXT NOT NULL DEFAULT 'header',
+                    ticket_status TEXT NOT NULL DEFAULT 'open',
+                    message_thread_id INTEGER,
+                    operator_id INTEGER,
+                    first_answered_at TEXT,
+                    closed_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (bot_id, support_chat_id, support_message_id)
+                );
+                INSERT INTO users (bot_id, user_id) VALUES ('psybot', 7);
+                INSERT INTO support_threads (
+                    bot_id, support_chat_id, support_message_id, user_id,
+                    origin_bot_id, origin_telegram_bot_id, ticket_id,
+                    message_role, ticket_status
+                ) VALUES (
+                    'psybot', -100, 10, 7, 'bpd', 101, 'legacy-1', 'header', 'open'
+                );
+                """
+            )
+            conn.commit()
+            before_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(support_threads)")
+            }
+        finally:
+            conn.close()
+
+        self.assertNotIn("user_full_name", before_cols)
+        self.assertNotIn("user_username", before_cols)
+
+        engine = StorageEngine(path)
+        await engine.initialize()
+
+        def inspect(conn):
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(support_threads)")}
+            row = conn.execute(
+                """
+                SELECT ticket_id, user_full_name, user_username
+                FROM support_threads
+                WHERE ticket_id = 'legacy-1'
+                """
+            ).fetchone()
+            return cols, row
+
+        cols, row = await engine.run(inspect)
+        self.assertIn("user_full_name", cols)
+        self.assertIn("user_username", cols)
+        self.assertEqual(row[0], "legacy-1")
+        self.assertIsNone(row[1])
+        self.assertIsNone(row[2])
+
+        store = SqliteSupportThreadStore(
+            path,
+            tenant_bot_id="psybot",
+            origin_bot_id="bpd",
+            origin_telegram_bot_id=101,
+        )
+        ticket = store.get_ticket("legacy-1")
+        self.assertIsNotNone(ticket)
+        self.assertIsNone(ticket.user_full_name)
+        self.assertIsNone(ticket.user_username)
 
 
 def _transaction_row(engine, bot_id: str, payment_id: str, provider: str = "telegram_stars"):

@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-10-01 — Gate S1: строка «От:» в карточке тикета
+
+**Почему.** После close/reopen карточка оператора теряла автора: имя не
+хранилось в `support_threads` / `SupportTicketTarget`.
+
+**Что сделано.** Столбцы `user_full_name` / `user_username` + миграция;
+keyword-only в `register`; сырое имя в БД, escape на выводе; duck-type store
+через `inspect.signature` без повторного `register` при TypeError.
+
+**Проверка.** Узкий контур **40 passed**. Полный сьют **228 passed**.
+
+**Не тронуто.** PsyBot, Chat Listener, Profiling, теги, push. S2 не начат.
+
+---
+
 ## 2026-10-01 — Gate U3: синее меню /start … /menu
 
 **Почему.** Порядок синей кнопки «Меню»: старт сверху, домен кузова, меню
