@@ -73,7 +73,7 @@ class TestChassisCycle(unittest.IsolatedAsyncioTestCase):
 
         await self._text(7, BTN_CABINET_RU, username="ann")
         cabinet = "\n".join(self._texts(7))
-        self.assertIn("Личный кабинет", cabinet)
+        self.assertIn("Аккаунт", cabinet)
         self.assertIn("ID: 7 | @ann | Зарегистрирован:", cabinet)
         self.assertIn("Доступ: Базовый", cabinet)
         self.assertIn("Доступно талонов: 0", cabinet)

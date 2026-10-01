@@ -25,11 +25,9 @@ from aiogram.filters import Command, Filter
 from loguru import logger
 
 from .contracts import (
-    BTN_CABINET_RU,
-    BTN_CABINET_EN,
+    LEGACY_BTN_CABINET_ALIASES,
     LEGACY_BTN_INFO_ALIASES,
-    BTN_SUPPORT_RU,
-    BTN_SUPPORT_EN,
+    LEGACY_BTN_SUPPORT_ALIASES,
     is_main_menu_button,
     extract_domain_labels,
     CB_SUPPORT_CANCEL,
@@ -174,10 +172,10 @@ def create_button_chassis_router(
         )
 
     # ----------------------------------------------------------------------
-    # 2. РАЗДЕЛ: [👤 Личный кабинет] (кнопка меню)
+    # 2. РАЗДЕЛ: [👤 Аккаунт] (кнопка меню)
     # ----------------------------------------------------------------------
     if enable_cabinet:
-        cabinet_aliases = {BTN_CABINET_RU, BTN_CABINET_EN, "Личный кабинет", "Кабинет", "💼 Личный кабинет", "Account"}
+        cabinet_aliases = set(LEGACY_BTN_CABINET_ALIASES)
 
         @router.message(F.text.in_(cabinet_aliases))
         async def handle_cabinet(message: types.Message):
@@ -204,7 +202,7 @@ def create_button_chassis_router(
                 else:
                     # Нейтральная карточка шасси (без зашитой коммерции)
                     sent = await message.answer(
-                        f"👤 <b>Личный кабинет</b>\n\n"
+                        f"👤 <b>Аккаунт</b>\n\n"
                         f"ID: <code>{user_id}</code>\n"
                         f"Раздел настроен в шасси.",
                         parse_mode="HTML",
@@ -214,7 +212,7 @@ def create_button_chassis_router(
                 tracker.release(user_id, current_task)
 
     # ----------------------------------------------------------------------
-    # 3. РАЗДЕЛ: [ℹ️ Info] (кнопка меню и команда /help)
+    # 3. РАЗДЕЛ: [ℹ️ Инфо/FAQ] (кнопка меню и команда /help)
     # ----------------------------------------------------------------------
     if enable_info:
         info_aliases = set(LEGACY_BTN_INFO_ALIASES)
@@ -290,10 +288,10 @@ def create_button_chassis_router(
             await _open_info(message)
 
     # ----------------------------------------------------------------------
-    # 4. РАЗДЕЛ: [💬 Поддержка] — обзор, скрытый /support сразу в форму
+    # 4. РАЗДЕЛ: [Поддержка] — обзор, скрытый /support сразу в форму
     # ----------------------------------------------------------------------
     if enable_support:
-        support_aliases = {BTN_SUPPORT_RU, BTN_SUPPORT_EN, "Поддержка", "Служба поддержки", "🛟 Поддержка", "Report", "Support"}
+        support_aliases = set(LEGACY_BTN_SUPPORT_ALIASES)
         donate_rows = tuple(
             (f"{sku.title} — {sku.stars_price} ⭐", f"buy_sku:{sku.sku_code}")
             for sku in donation_items

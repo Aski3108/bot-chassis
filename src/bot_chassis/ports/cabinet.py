@@ -93,7 +93,7 @@ def build_cabinet_renderer(
     async def _render(message: types.Message, user_id: int, bot: Bot) -> Optional[types.Message]:
         del bot
         slots = await adapter.get_cabinet_slots(bot_id, user_id)
-        lines = ["👤 <b>Личный кабинет</b>"]
+        lines = ["👤 <b>Аккаунт</b>"]
         for slot in slots:
             lines.append(f"<b>{html.escape(slot.title)}</b>\n{html.escape(slot.content)}")
         text = "\n\n".join(lines)

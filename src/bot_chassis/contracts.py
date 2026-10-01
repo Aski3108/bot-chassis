@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 # Русские названия кнопок (по умолчанию)
-BTN_CABINET_RU: str = "👤 Личный кабинет"
-BTN_INFO_RU: str = "ℹ️ Info/FAQ"
-BTN_SUPPORT_RU: str = "💬 Поддержка"
+BTN_CABINET_RU: str = "👤 Аккаунт"
+BTN_INFO_RU: str = "ℹ️ Инфо/FAQ"
+BTN_SUPPORT_RU: str = "Поддержка"
 
 # Английские названия кнопок
 BTN_CABINET_EN: str = "👤 Account"
@@ -27,6 +27,7 @@ BTN_SUPPORT: str = BTN_SUPPORT_RU
 # Алиасы для распознавания кликов и сброса ввода
 LEGACY_BTN_CABINET_ALIASES = frozenset({
     "Личный кабинет",
+    "👤 Личный кабинет",
     "Кабинет",
     "💼 Личный кабинет",
     "Мой профиль",
@@ -42,6 +43,8 @@ LEGACY_BTN_INFO_ALIASES = frozenset({
     "ℹ️ О сервисе",
     "ℹ️ Info",
     "ℹ️ Info / FAQ ❓",
+    "ℹ️ Info/FAQ",
+    "Инфо/FAQ",
     "Информация",
     "FAQ",
     BTN_INFO_RU,
@@ -50,6 +53,7 @@ LEGACY_BTN_INFO_ALIASES = frozenset({
 
 LEGACY_BTN_SUPPORT_ALIASES = frozenset({
     "Поддержка",
+    "💬 Поддержка",
     "Служба поддержки",
     "🛟 Поддержка",
     "Report",

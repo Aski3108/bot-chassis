@@ -16,7 +16,12 @@ from aiogram.types import BotCommand, Chat, Message, Update, User
 
 from bot_chassis.commands import setup_bot_commands
 from bot_chassis.config import BotChassisConfig
-from bot_chassis.contracts import BTN_INFO_EN, BTN_INFO_RU, is_main_menu_button
+from bot_chassis.contracts import (
+    BTN_INFO_EN,
+    BTN_INFO_RU,
+    BTN_SUPPORT_RU,
+    is_main_menu_button,
+)
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.keyboards import build_main_menu_keyboard
 from bot_chassis.middleware.error_monitor import ErrorAlertMiddleware
@@ -72,15 +77,33 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     def test_service_buttons_share_one_row_and_old_info_label_stays_alias(self) -> None:
-        self.assertEqual(BTN_INFO_RU, "ℹ️ Info/FAQ")
+        self.assertEqual(BTN_INFO_RU, "ℹ️ Инфо/FAQ")
         self.assertEqual(BTN_INFO_EN, "ℹ️ Info/FAQ")
         self.assertTrue(is_main_menu_button("ℹ️ Info"))
         self.assertTrue(is_main_menu_button("ℹ️ Info / FAQ ❓"))
+        self.assertTrue(is_main_menu_button("ℹ️ Info/FAQ"))
         keyboard = build_main_menu_keyboard(locale="en", domain_rows=(("Chats",),))
         self.assertEqual(
             [[button.text for button in row] for row in keyboard.keyboard],
             [["Chats"], ["👤 Account", "ℹ️ Info/FAQ", "💬 Support"]],
         )
+
+    def test_ru_labels_0_3_1_and_legacy_aliases(self) -> None:
+        ru = build_main_menu_keyboard(locale="ru")
+        self.assertEqual(len(ru.keyboard), 1)
+        self.assertEqual(
+            [button.text for button in ru.keyboard[0]],
+            ["👤 Аккаунт", "ℹ️ Инфо/FAQ", "Поддержка"],
+        )
+        en = build_main_menu_keyboard(locale="en")
+        self.assertEqual(
+            [button.text for button in en.keyboard[0]],
+            ["👤 Account", "ℹ️ Info/FAQ", "💬 Support"],
+        )
+        self.assertTrue(is_main_menu_button("👤 Личный кабинет"))
+        self.assertTrue(is_main_menu_button("💬 Поддержка"))
+        self.assertTrue(is_main_menu_button("ℹ️ Info/FAQ"))
+        self.assertEqual(BTN_SUPPORT_RU, "Поддержка")
 
     async def test_visible_commands_are_menu_plus_explicit_body_commands(self) -> None:
         bot = AsyncMock()

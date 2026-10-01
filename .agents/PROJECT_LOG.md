@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-01 — Gate U1: RU-подписи служебной тройки
+
+**Почему.** Пакет `0.3.1`: компактные RU-подписи основной Reply-клавиатуры без
+ломки старых кнопок на экране пользователей.
+
+**Что сделано.** `BTN_CABINET_RU` → `👤 Аккаунт`, `BTN_INFO_RU` → `ℹ️ Инфо/FAQ`,
+`BTN_SUPPORT_RU` → `Поддержка` (без эмодзи). EN не менялся. Старые подписи
+добавлены литералами в `LEGACY_BTN_*_ALIASES`; `router` берёт общие наборы.
+Карточка кабинета — «Аккаунт». Frozen `tests/test_chassis.py`: ровно строка
+104, литерал → `BTN_INFO_RU`, тестов по-прежнему 19. Новый тест
+`test_ru_labels_0_3_1_and_legacy_aliases`. Ожидания в `test_gate1a_locale.py`
+и `test_integration.py` подтянуты под новые подписи.
+
+**Проверка.** `tests/test_chassis.py` — 19 passed. Полный сьют — **220 passed**.
+`compileall` и `git diff --check` чистые.
+
+**Не тронуто.** EN-подписи, `callback_data`, PsyBot, Chat Listener, Profiling,
+теги, push.
+
+---
+
 ## 2026-10-01 — Gate C0: control plane под 0.3.1; BASE_REF=d3c79cd
 
 **Почему.** На `feat/chassis-0.3` лежали четыре незалогированных коммита

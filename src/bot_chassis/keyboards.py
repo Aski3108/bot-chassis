@@ -45,7 +45,7 @@ def build_main_menu_keyboard(
     - Если переданы domain_rows — они размещаются ВЕРХНИМИ рядами над служебной тройкой.
       (Например, для Chat Listener: [["Ваши чаты", "Ваши слова"]]).
     - Ниже включённые служебные кнопки всегда стоят в одном ряду:
-        [👤 Личный кабинет] [ℹ️ Info/FAQ] [💬 Поддержка]
+        [👤 Аккаунт] [ℹ️ Инфо/FAQ] [Поддержка]
     """
     labels = MenuLabels.for_locale(locale)
     keyboard: list[list[KeyboardButton]] = []

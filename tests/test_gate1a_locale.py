@@ -277,6 +277,11 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edits[1].reply_markup.inline_keyboard[0][0].text, "🌐 English / Русский")
 
     async def test_same_service_labels_do_not_send_another_menu(self) -> None:
+        """Если видимые подписи служебного ряда не меняются — носитель не шлётся.
+
+        После 0.3.1 RU/EN Info различаются, поэтому кейс «одинаковые подписи»
+        собирается с выключенной тройкой: toggle только перерисовывает inline.
+        """
         from bot_chassis.localization import create_localization_router
 
         storage = await create_storage(BotChassisConfig(bot_id="bot_a", db_path=self.db_path))
@@ -289,6 +294,7 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
                 enabled=True,
                 locale_cache={9: "ru"},
                 enable_cabinet=False,
+                enable_info=False,
                 enable_support=False,
             )
         )

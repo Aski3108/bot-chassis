@@ -101,7 +101,7 @@ class TestButtonChassisUnit(unittest.TestCase):
         self.assertEqual(len(full.keyboard), 1)
         self.assertEqual(
             [button.text for button in full.keyboard[0]],
-            [BTN_CABINET_RU, "ℹ️ Info/FAQ", BTN_SUPPORT_RU],
+            [BTN_CABINET_RU, BTN_INFO_RU, BTN_SUPPORT_RU],
         )
 
     def test_domain_labels_cancel_support_ticket(self):
