@@ -26,8 +26,12 @@
 - Из этого корня не менять PsyBot (`C:\Python\tg_psy_tests`) и Chat Listener
   (`C:\Python\tg_chat_listener`).
 - Не переключать checkout Profiling и не ретегать `profiling`.
-- `tests/test_chassis.py` заморожен. Единственное исключение `0.3.1`: Gate U1
-  меняет ровно строку 104 (`"ℹ️ Info/FAQ"` → `BTN_INFO_RU`), тестов остаётся 19.
+- `tests/test_chassis.py` заморожен, тестов остаётся 19. Узкие исключения
+  `0.3.1`: U1 — строка 104 (`"ℹ️ Info/FAQ"` → `BTN_INFO_RU`); U3 — только
+  два существующих тестовых блока команд под `start → domain → menu`; S2 —
+  существующий интеграционный тестовый блок под один `SendMessage`. Внутри
+  этих блоков разрешены связанные комментарий/докстринг; импорты, структура
+  и любые строки вне перечисленных блоков не разрешены.
 - Gate U2 `0.3.1` вправе удалить только `cancel_callback` / `cancel_label`
   из `build_support_prompt_keyboard` (breaking — в CHANGELOG и чек-листе
   миграции). Другие сигнатуры Button Chassis не ломать.
