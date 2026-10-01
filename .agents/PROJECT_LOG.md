@@ -14,8 +14,9 @@
 обзор Поддержки с «Отмена»; форма тикета снова с «Назад» на `core_sup:hub`;
 единый `handle_nav_close` для close/cancel/back; `core_sup:cancel` → hub;
 `_deliver_start_card` / card-only `Отмена`; кабинет → `ChassisScreen`.
-Тест `test_navigation_canon_cancel_and_back`. Frozen: ожидание cancel→обзор
-(иначе конфликт с каноном). `test_ports_and_middleware` под новый renderer.
+Тест `test_navigation_canon_cancel_and_back`. Legacy `core_sup:cancel`
+открывает обзор и сбрасывает pending, сохраняя frozen-контракт очистки tracker.
+`test_ports_and_middleware` под новый renderer.
 
 **Проверка.** Frozen **19 passed**. Узкий контур U2 зелёный. Полный сьют
 **221 passed**. `compileall` / `git diff --check` чистые. Вторых обработчиков

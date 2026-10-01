@@ -82,7 +82,8 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
   `BTN_INFO_RU`. Подтянуты `test_gate1a_locale.py` и `test_integration.py`.
 - [x] **Gate U2. Канон навигации «Отмена» vs «Назад».** Корень → `Отмена` и
   card-only старт; подэкран → `Назад`. `d0b170f` отменён. Frozen: ожидание
-  `core_sup:cancel` → обзор; `test_ports_and_middleware` под `ChassisScreen`.
+  очистки tracker сохранено; legacy `core_sup:cancel` → обзор и сброс pending;
+  `test_ports_and_middleware` под `ChassisScreen`.
 - [ ] **Gate U3. Синее меню команд.** `/start` сверху, доменные в середине,
   `/menu` внизу; один набор, подписи `Старт / Start` и `Меню / Menu`.
 - [ ] **Gate S1. Строка «От:» во всех статусах тикета.** Новые столбцы

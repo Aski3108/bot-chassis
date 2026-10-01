@@ -512,6 +512,8 @@ def create_button_chassis_router(
         async def handle_support_hub(query: types.CallbackQuery):
             await query.answer()
             await _open_overview(query, run_hook=False)
+            if query.data == CB_SUPPORT_CANCEL:
+                screens.forget_card(query.from_user.id if query.from_user else 0)
 
         @router.callback_query(F.data == CB_SUPPORT_DONATE)
         async def handle_support_donate(query: types.CallbackQuery):

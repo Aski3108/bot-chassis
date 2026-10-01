@@ -534,7 +534,7 @@ class TestButtonChassisDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(new_requests), 0)
 
     async def test_support_cancel_forgets_card_in_tracker(self):
-        """Старый core_sup:cancel открывает корень Поддержки; pending сброшен."""
+        """Проверка, что нажатие инлайн-кнопки отмены тикета забывает карточку в трекере экранов."""
         self.screen_tracker.remember_card(user_id=106, chat_id=106, message_id=300)
         self.pending_store.set(106, PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE))
 
@@ -557,10 +557,9 @@ class TestButtonChassisDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
 
         await self.dp.feed_update(self.bot, update)
 
+        # Проверяем, что карточка забыта в трекере!
+        self.assertIsNone(self.screen_tracker.get_card(106))
         self.assertFalse(self.pending_store.is_active(106, PendingInputKind.SUPPORT_MESSAGE))
-        card = self.screen_tracker.get_card(106)
-        self.assertIsNotNone(card)
-        self.assertEqual(card[:2], (106, 300))
 
     async def test_ticket_receipt_does_not_attach_reply_markup(self):
         """Проверка, что квитанция отправки тикета НЕ содержит reply_markup (не плодит новые носители)."""
