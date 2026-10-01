@@ -647,7 +647,9 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             if item.__class__.__name__ in {"SendMessage", "CopyMessage"}
             and getattr(item, "chat_id", None) == 7
         ]
-        self.assertEqual(len(user_sends), 2)
+        self.assertEqual(len(user_sends), 1)
+        self.assertEqual(user_sends[0].__class__.__name__, "SendMessage")
+        self.assertIn("answer", user_sends[0].text)
         self.assertEqual(store.resolve_ticket(-100, 10).ticket_status, "in_progress")
         origin_session.requests.clear()
         await chassis.dp.feed_update(origin_bot, Update(update_id=300, message=reply))

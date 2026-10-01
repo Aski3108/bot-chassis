@@ -491,14 +491,14 @@ class TestButtonChassisDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         req_count_before_reply = len(self.session.requests)
         await self.dp.feed_update(self.bot, update_support)
 
-        # Пользователю 105 доставлены шапка ответа и копия сообщения администратора
+        # Пользователю 105 — одно сообщение: шапка + текст ответа (режим text)
         user_copies_support = [
             r for r in self.session.requests[req_count_before_reply:]
             if getattr(r, "chat_id", None) == 105
         ]
-        self.assertEqual(len(user_copies_support), 2)
+        self.assertEqual(len(user_copies_support), 1)
         self.assertEqual(user_copies_support[0].__class__.__name__, "SendMessage")
-        self.assertEqual(user_copies_support[1].__class__.__name__, "CopyMessage")
+        self.assertIn("Здравствуйте, мы исправили C4!", user_copies_support[0].text)
 
     async def test_admin_chat_chatter_silently_ignored(self):
         """

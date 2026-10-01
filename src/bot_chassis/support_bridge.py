@@ -32,6 +32,39 @@ from .storage.sqlite_support_thread_store import TicketLimitExceeded
 DEFAULT_SUPPORT_PERSISTENCE_PATH = os.path.join("temp", "support_threads.json")
 _MISSING_THREAD_ID = object()
 _CONTINUATION_STATUSES = {"open", "in_progress"}
+_CAPTIONABLE_ATTRS = ("photo", "video", "document", "audio", "animation", "voice")
+_MAX_MESSAGE_TEXT = 4096
+_MAX_CAPTION = 1024
+
+
+def compose_support_reply(
+    admin_reply_message: types.Message,
+    support_header: str,
+) -> tuple[str, str | None]:
+    """Возвращает (режим, текст). Режим: 'text' | 'caption' | 'split'."""
+    media_group_id = getattr(admin_reply_message, "media_group_id", None)
+    if media_group_id:
+        return "split", None
+
+    text = getattr(admin_reply_message, "text", None)
+    if text:
+        html_text = getattr(admin_reply_message, "html_text", None) or ""
+        payload = f"{support_header}\n\n{html_text}"
+        if len(payload) <= _MAX_MESSAGE_TEXT:
+            return "text", payload
+        return "split", None
+
+    if any(getattr(admin_reply_message, attr, None) for attr in _CAPTIONABLE_ATTRS):
+        html_caption = getattr(admin_reply_message, "html_caption", None) or ""
+        if html_caption:
+            payload = f"{support_header}\n\n{html_caption}"
+        else:
+            payload = support_header
+        if len(payload) <= _MAX_CAPTION:
+            return "caption", payload
+        return "split", None
+
+    return "split", None
 
 
 class SupportThreadStore:
@@ -432,19 +465,36 @@ async def deliver_support_reply_to_user(
         reply_markup = build_user_ticket_reply_keyboard(target_ticket.ticket_id)
 
     try:
-        # 1. Шапка ответа
-        await bot.send_message(
-            chat_id=target_user_id,
-            text=support_header,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-        # 2. Копия ответа администратора
-        copied = await bot.copy_message(
-            chat_id=target_user_id,
-            from_chat_id=admin_reply_message.chat.id,
-            message_id=admin_reply_message.message_id,
-        )
+        mode, payload = compose_support_reply(admin_reply_message, support_header)
+        if mode == "text":
+            delivered = await bot.send_message(
+                chat_id=target_user_id,
+                text=payload,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        elif mode == "caption":
+            delivered = await bot.copy_message(
+                chat_id=target_user_id,
+                from_chat_id=admin_reply_message.chat.id,
+                message_id=admin_reply_message.message_id,
+                caption=payload,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        else:
+            # split: шапка + полная копия ответа (безопасный режим)
+            await bot.send_message(
+                chat_id=target_user_id,
+                text=support_header,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            delivered = await bot.copy_message(
+                chat_id=target_user_id,
+                from_chat_id=admin_reply_message.chat.id,
+                message_id=admin_reply_message.message_id,
+            )
         if target_ticket is not None:
             if continuable:
                 operator_id = getattr(
@@ -470,13 +520,13 @@ async def deliver_support_reply_to_user(
                         telegram_message_id=admin_reply_message.message_id,
                         message_thread_id=actual_thread_id,
                     )
-                    copied_id = getattr(copied, "message_id", None)
-                    if copied_id is not None:
+                    delivered_id = getattr(delivered, "message_id", None)
+                    if delivered_id is not None:
                         record_message(
                             target_ticket.ticket_id,
                             direction="support_to_user",
                             telegram_chat_id=target_user_id,
-                            telegram_message_id=copied_id,
+                            telegram_message_id=delivered_id,
                             message_thread_id=None,
                         )
                 mark_in_progress = getattr(thread_store, "mark_in_progress", None)

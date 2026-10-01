@@ -15,12 +15,17 @@ from bot_chassis.storage.sqlite_support_thread_store import (
 )
 from bot_chassis.support_bridge import (
     SupportThreadStore,
+    _MAX_CAPTION,
+    _MAX_MESSAGE_TEXT,
+    compose_support_reply,
     deliver_support_reply_to_user,
     operator_card_text,
     refresh_operator_card,
     send_user_followup_to_support,
     send_user_report_to_support,
 )
+
+_DEFAULT_HEADER = "💬 <b>Ответ службы поддержки:</b>"
 
 
 class _Bot:
@@ -31,13 +36,13 @@ class _Bot:
         self._next_message_id = 100
 
     async def send_message(self, chat_id: int, text: str, **_kwargs):
-        self.sent.append(("send", chat_id, text, _kwargs.get("reply_markup")))
+        self.sent.append(("send", chat_id, text, _kwargs.get("reply_markup"), _kwargs))
         message = SimpleNamespace(message_id=self._next_message_id)
         self._next_message_id += 1
         return message
 
     async def copy_message(self, chat_id: int, from_chat_id: int, message_id: int, **_kwargs):
-        self.sent.append(("copy", chat_id, message_id))
+        self.sent.append(("copy", chat_id, message_id, _kwargs))
         message = SimpleNamespace(message_id=self._next_message_id)
         self._next_message_id += 1
         return message
@@ -54,7 +59,7 @@ class _Bot:
         return True
 
 
-def _reply(chat_id: int, message_id: int, reply_to: int, thread_id=None):
+def _reply(chat_id: int, message_id: int, reply_to: int, thread_id=None, **extra):
     payload = {
         "chat": SimpleNamespace(id=chat_id),
         "message_id": message_id,
@@ -63,7 +68,29 @@ def _reply(chat_id: int, message_id: int, reply_to: int, thread_id=None):
     }
     if thread_id is not None:
         payload["message_thread_id"] = thread_id
+    payload.update(extra)
     return SimpleNamespace(**payload)
+
+
+def _user_outbound(bot: _Bot, user_id: int = 7) -> list[tuple]:
+    return [item for item in bot.sent if item[0] in {"send", "copy"} and item[1] == user_id]
+
+
+def _recorded_user_message_ids(db_path: str, ticket_id: str, user_id: int) -> list[int]:
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT telegram_message_id
+            FROM support_ticket_messages
+            WHERE ticket_id = ? AND telegram_chat_id = ? AND direction = 'support_to_user'
+            ORDER BY rowid
+            """,
+            (ticket_id, user_id),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [int(row[0]) for row in rows]
 
 
 class TestGate5BTickets(unittest.IsolatedAsyncioTestCase):
@@ -511,6 +538,308 @@ class TestGate5BTickets(unittest.IsolatedAsyncioTestCase):
         result = await send_user_report_to_support(bot2, -100, user_message, ExplodingStore())
         self.assertIsNone(result)
         self.assertEqual(len(calls), boom_calls_before + 1)
+
+    async def test_text_reply_arrives_as_single_message(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                text="Оператор отвечает",
+                html_text="Оператор отвечает",
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 1)
+        kind, chat_id, text, markup, kwargs = outbound[0]
+        self.assertEqual(kind, "send")
+        self.assertEqual(chat_id, 7)
+        self.assertIn(_DEFAULT_HEADER, text)
+        self.assertIn("Оператор отвечает", text)
+        self.assertEqual(kwargs.get("parse_mode"), "HTML")
+        self.assertIn("core_sup:ureply:", str(markup))
+
+    async def test_media_with_caption_arrives_as_single_message(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                photo=[SimpleNamespace(file_id="p1")],
+                caption="Подпись фото",
+                html_caption="Подпись фото",
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 1)
+        kind, chat_id, message_id, kwargs = outbound[0]
+        self.assertEqual(kind, "copy")
+        self.assertEqual(chat_id, 7)
+        self.assertEqual(message_id, 500)
+        self.assertIn(_DEFAULT_HEADER, kwargs["caption"])
+        self.assertIn("Подпись фото", kwargs["caption"])
+        self.assertEqual(kwargs.get("parse_mode"), "HTML")
+        self.assertIn("core_sup:ureply:", str(kwargs.get("reply_markup")))
+
+    async def test_voice_without_caption_still_single_message(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                voice=SimpleNamespace(file_id="v1"),
+                caption=None,
+                html_caption=None,
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 1)
+        kind, _chat_id, _message_id, kwargs = outbound[0]
+        self.assertEqual(kind, "copy")
+        self.assertEqual(kwargs["caption"], _DEFAULT_HEADER)
+        self.assertIn("core_sup:ureply:", str(kwargs.get("reply_markup")))
+
+    async def test_sticker_reply_keeps_two_messages(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                sticker=SimpleNamespace(file_id="s1"),
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 2)
+        self.assertEqual(outbound[0][0], "send")
+        self.assertEqual(outbound[0][2], _DEFAULT_HEADER)
+        self.assertIn("core_sup:ureply:", str(outbound[0][3]))
+        self.assertEqual(outbound[1][0], "copy")
+        self.assertEqual(outbound[1][2], 500)
+        self.assertNotIn("caption", outbound[1][3])
+
+    async def test_html_metacharacters_are_safe(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                text="A < B & C > D",
+                html_text="A &lt; B &amp; C &gt; D <b>bold</b>",
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        text_out = _user_outbound(bot)[0][2]
+        self.assertIn("A &lt; B &amp; C &gt; D <b>bold</b>", text_out)
+        self.assertNotIn("A < B & C > D", text_out)
+
+        bot2 = _Bot(101)
+        self.store.register(-100, 8, 20, 21, ticket_id="t2")
+        ok, _status = await deliver_support_reply_to_user(
+            bot2,
+            _reply(
+                -100,
+                501,
+                21,
+                photo=[SimpleNamespace(file_id="p1")],
+                caption="x < y & z",
+                html_caption="x &lt; y &amp; z <i>note</i>",
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        caption = _user_outbound(bot2, user_id=8)[0][3]["caption"]
+        self.assertIn("x &lt; y &amp; z <i>note</i>", caption)
+        self.assertNotIn("x < y & z", caption)
+
+    async def test_media_group_uses_split_mode(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(
+                -100,
+                500,
+                11,
+                photo=[SimpleNamespace(file_id="p1")],
+                caption="альбом",
+                html_caption="альбом",
+                media_group_id="mg-1",
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 2)
+        self.assertEqual(outbound[0][0], "send")
+        self.assertEqual(outbound[1][0], "copy")
+        self.assertNotIn("caption", outbound[1][3])
+
+    async def test_over_limit_reply_uses_split_without_truncation(self) -> None:
+        self.store.register(-100, 7, 10, 11, ticket_id="t1")
+        bot = _Bot(101)
+        text_body = "T" * (_MAX_MESSAGE_TEXT - len(_DEFAULT_HEADER) - 1)
+        html_text = text_body
+        self.assertGreater(len(f"{_DEFAULT_HEADER}\n\n{html_text}"), _MAX_MESSAGE_TEXT)
+        ok, _status = await deliver_support_reply_to_user(
+            bot,
+            _reply(-100, 500, 11, text=text_body, html_text=html_text),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound = _user_outbound(bot)
+        self.assertEqual(len(outbound), 2)
+        self.assertEqual(outbound[0][0], "send")
+        self.assertEqual(outbound[0][2], _DEFAULT_HEADER)
+        self.assertEqual(outbound[1][0], "copy")
+        self.assertEqual(outbound[1][2], 500)
+        self.assertNotIn("caption", outbound[1][3])
+
+        bot2 = _Bot(101)
+        self.store.register(-100, 8, 20, 21, ticket_id="t2")
+        caption_body = "C" * (_MAX_CAPTION - len(_DEFAULT_HEADER) - 1)
+        self.assertGreater(len(f"{_DEFAULT_HEADER}\n\n{caption_body}"), _MAX_CAPTION)
+        ok, _status = await deliver_support_reply_to_user(
+            bot2,
+            _reply(
+                -100,
+                501,
+                21,
+                photo=[SimpleNamespace(file_id="p1")],
+                caption=caption_body,
+                html_caption=caption_body,
+            ),
+            self.store,
+        )
+        self.assertTrue(ok)
+        outbound2 = _user_outbound(bot2, user_id=8)
+        self.assertEqual(len(outbound2), 2)
+        self.assertEqual(outbound2[0][0], "send")
+        self.assertEqual(outbound2[1][0], "copy")
+        self.assertEqual(outbound2[1][2], 501)
+        self.assertNotIn("caption", outbound2[1][3])
+
+    async def test_single_message_mode_records_ticket_message(self) -> None:
+        cases = [
+            ("text-t", {"text": "hi", "html_text": "hi"}, "send"),
+            (
+                "caption-t",
+                {
+                    "photo": [SimpleNamespace(file_id="p1")],
+                    "caption": "cap",
+                    "html_caption": "cap",
+                },
+                "copy",
+            ),
+            ("split-t", {"sticker": SimpleNamespace(file_id="s1")}, "copy"),
+        ]
+        for index, (ticket_id, extra, delivered_kind) in enumerate(cases):
+            header_id = 10 + index * 2
+            copy_id = 11 + index * 2
+            admin_id = 500 + index
+            user_id = 70 + index
+            self.store.register(-100, user_id, header_id, copy_id, ticket_id=ticket_id)
+            bot = _Bot(101)
+            ok, _status = await deliver_support_reply_to_user(
+                bot,
+                _reply(-100, admin_id, copy_id, **extra),
+                self.store,
+            )
+            self.assertTrue(ok)
+            self.assertEqual(
+                self.store.get_ticket(ticket_id).ticket_status,
+                "in_progress",
+            )
+            outbound = _user_outbound(bot, user_id=user_id)
+            if delivered_kind == "send":
+                delivered_msg_id = 100  # first outbound from fresh _Bot
+                self.assertEqual(outbound[0][0], "send")
+            else:
+                # split: header send=100, copy=101; caption: copy=100
+                if outbound[0][0] == "send":
+                    delivered_msg_id = 101
+                else:
+                    delivered_msg_id = 100
+            recorded = _recorded_user_message_ids(self.db_path, ticket_id, user_id)
+            self.assertIn(delivered_msg_id, recorded)
+            self.assertTrue(self.store.message_recorded(-100, admin_id))
+
+
+class TestComposeSupportReply(unittest.TestCase):
+    def test_compose_support_reply_modes(self) -> None:
+        header = _DEFAULT_HEADER
+        mode, payload = compose_support_reply(
+            SimpleNamespace(text="hello", html_text="hello"),
+            header,
+        )
+        self.assertEqual(mode, "text")
+        self.assertEqual(payload, f"{header}\n\nhello")
+
+        mode, payload = compose_support_reply(
+            SimpleNamespace(
+                photo=[SimpleNamespace(file_id="p")],
+                html_caption="cap",
+            ),
+            header,
+        )
+        self.assertEqual(mode, "caption")
+        self.assertEqual(payload, f"{header}\n\ncap")
+
+        mode, payload = compose_support_reply(
+            SimpleNamespace(voice=SimpleNamespace(file_id="v"), html_caption=None),
+            header,
+        )
+        self.assertEqual(mode, "caption")
+        self.assertEqual(payload, header)
+
+        mode, payload = compose_support_reply(
+            SimpleNamespace(sticker=SimpleNamespace(file_id="s")),
+            header,
+        )
+        self.assertEqual(mode, "split")
+        self.assertIsNone(payload)
+
+        mode, payload = compose_support_reply(
+            SimpleNamespace(
+                photo=[SimpleNamespace(file_id="p")],
+                html_caption="x",
+                media_group_id="g1",
+            ),
+            header,
+        )
+        self.assertEqual(mode, "split")
+        self.assertIsNone(payload)
+
+        huge = "X" * (_MAX_MESSAGE_TEXT)
+        mode, payload = compose_support_reply(
+            SimpleNamespace(text=huge, html_text=huge),
+            header,
+        )
+        self.assertEqual(mode, "split")
+        self.assertIsNone(payload)
 
 
 if __name__ == "__main__":
