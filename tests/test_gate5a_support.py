@@ -279,6 +279,7 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(deletes)
         self.assertTrue(any("передано в службу поддержки" in text for text in self._texts()))
+        self.assertTrue(any("Для дальнейших действий нажмите меню" in text for text in self._texts()))
 
     def test_pending_input_keeps_old_positional_created_at(self) -> None:
         stamp = 123.5

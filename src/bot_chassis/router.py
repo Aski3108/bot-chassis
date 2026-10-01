@@ -587,7 +587,8 @@ def create_button_chassis_router(
                     await screens.close_previous_card(message.bot, user_id)
                 await message.answer(
                     "✅ <b>Ваше сообщение передано в службу поддержки.</b>\n"
-                    "Мы ответим вам прямо в этот диалог.",
+                    "Мы ответим вам прямо в этот диалог.\n\n"
+                    "Для дальнейших действий нажмите меню.",
                     parse_mode="HTML",
                 )
             else:
