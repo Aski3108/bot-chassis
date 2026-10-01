@@ -102,7 +102,7 @@ def build_support_overview_keyboard(
     show_donate: bool = False,
 ) -> InlineKeyboardMarkup:
     """Обзор поддержки: запрос, опционально отзыв и донат, назад на старт."""
-    rows = [[InlineKeyboardButton(text="📝 Запрос в поддержку", callback_data="core_sup:request")]]
+    rows = [[InlineKeyboardButton(text="📝 Написать в поддержку", callback_data="core_sup:request")]]
     if show_review:
         rows.append([InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data="core_sup:review")])
     if show_donate:
