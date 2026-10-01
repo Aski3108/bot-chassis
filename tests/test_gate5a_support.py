@@ -32,7 +32,7 @@ class _Session(BaseSession):
     async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None):
         self.requests.append(method)
         name = method.__class__.__name__
-        if name in {"SendMessage", "EditMessageText"}:
+        if name in {"SendMessage", "EditMessageText", "CopyMessage"}:
             return Message(
                 message_id=getattr(method, "message_id", None) or len(self.requests),
                 date=int(time.time()),
@@ -257,6 +257,28 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(invoices), 1)
         self.assertEqual(invoices[0].prices[0].amount, 50)
+
+    async def test_successful_ticket_closes_prompt_card(self) -> None:
+        config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+            support_chat_id=-1003299,
+        )
+        chassis = await create_complete_chassis(self.bot, config)
+        await self._message(chassis, 7, "/support", 1)
+        self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
+        self.session.requests.clear()
+        await self._message(chassis, 7, "нужна помощь", 2)
+        self.assertFalse(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
+        deletes = [
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "DeleteMessage"
+        ]
+        self.assertTrue(deletes)
+        self.assertTrue(any("передано в службу поддержки" in text for text in self._texts()))
 
     def test_pending_input_keeps_old_positional_created_at(self) -> None:
         stamp = 123.5

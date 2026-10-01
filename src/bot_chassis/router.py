@@ -583,6 +583,8 @@ def create_button_chassis_router(
                 )
             if copied_id:
                 # Чек тикета НЕ должен быть новым носителем клавиатуры
+                if message.bot is not None:
+                    await screens.close_previous_card(message.bot, user_id)
                 await message.answer(
                     "✅ <b>Ваше сообщение передано в службу поддержки.</b>\n"
                     "Мы ответим вам прямо в этот диалог.",
