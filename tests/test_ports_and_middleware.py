@@ -303,14 +303,16 @@ class TestPortsAndMiddleware(unittest.IsolatedAsyncioTestCase):
         renderer = build_cabinet_renderer(cabinet, "bot_a")
         expected = inspect.signature(create_button_chassis_router).parameters["render_cabinet_callback"].annotation
         self.assertEqual(list(inspect.signature(renderer).parameters), ["message", "user_id", "bot"])
-        self.assertIn("Message", str(expected))
+        self.assertIn("ChassisScreen", str(expected))
         message = AsyncMock()
         message.answer = AsyncMock(return_value="sent")
-        self.assertEqual(await renderer(message, 8, AsyncMock()), "sent")
-        text = message.answer.await_args.args[0]
-        self.assertIn("@ann&lt;b&gt;", text)
-        self.assertNotIn("@ann<b>", text)
-        self.assertEqual(message.answer.await_args.kwargs["parse_mode"], "HTML")
+        from bot_chassis.localization import ChassisScreen
+
+        screen = await renderer(message, 8, AsyncMock())
+        self.assertIsInstance(screen, ChassisScreen)
+        self.assertIn("@ann&lt;b&gt;", screen.text)
+        self.assertNotIn("@ann<b>", screen.text)
+        message.answer.assert_not_awaited()
 
     async def test_throttling_middleware(self) -> None:
         clock = {"t": 10_000.0}

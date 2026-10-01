@@ -391,7 +391,7 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
         info_sends = _send_messages(self.session)
         self.assertEqual([item.text for item in info_sends], ["INFO"])
         labels = [button.text for row in info_sends[0].reply_markup.inline_keyboard for button in row]
-        self.assertEqual(labels, ["Подробнее", "🌐 English / Русский"])
+        self.assertEqual(labels, ["Подробнее", "🌐 English / Русский", "Отмена"])
 
     async def test_default_start_and_info_carry_toggle_without_body_renderers(self) -> None:
         config = BotChassisConfig(
@@ -440,10 +440,10 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
         info_sends = _send_messages(self.session)
         self.assertEqual(len(info_sends), 1)
         self.assertIn("Info/FAQ (Demo)", info_sends[0].text)
-        self.assertEqual(
-            info_sends[0].reply_markup.inline_keyboard[0][0].callback_data,
-            "core_lang:toggle",
-        )
+        rows = info_sends[0].reply_markup.inline_keyboard
+        self.assertEqual(rows[0][0].callback_data, "core_lang:toggle")
+        self.assertEqual(rows[-1][0].callback_data, "core_nav:cancel")
+        self.assertEqual(rows[-1][0].text, "Отмена")
         deletes = [item for item in self.session.requests if item.__class__.__name__ == "DeleteMessage"]
         self.assertEqual(len(deletes), 1)
 
@@ -511,6 +511,13 @@ class TestLanguageToggleFlow(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        edits = [
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "EditMessageReplyMarkup"
+        ]
+        self.assertEqual(len(edits), 1)
+        self.assertEqual(edits[0].message_id, 50)
         self.assertEqual(_send_messages(self.session), [])
 
     async def test_without_locale_callback_chassis_still_switches(self) -> None:

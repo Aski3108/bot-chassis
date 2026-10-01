@@ -96,6 +96,13 @@ CB_REVIEW_CONSENT_NO: str = f"{CALLBACK_PREFIX_REVIEW}no"
 CB_REVIEW_PUBLISH_PREFIX: str = f"{CALLBACK_PREFIX_REVIEW}pub:"
 CB_REVIEW_REJECT_PREFIX: str = f"{CALLBACK_PREFIX_REVIEW}rej:"
 CB_NAV_CLOSE: str = f"{CALLBACK_PREFIX_NAV}close"
+CB_NAV_CANCEL: str = f"{CALLBACK_PREFIX_NAV}cancel"
+LABEL_CANCEL_RU: str = "Отмена"
+LABEL_CANCEL_EN: str = "Cancel"
+LABEL_BACK_RU: str = "Назад"
+LABEL_BACK_EN: str = "Back"
+# CB_SUPPORT_BACK / CB_SUPPORT_CANCEL — совместимость: обрабатываются тем же
+# хэндлером, что CB_NAV_CANCEL / CB_SUPPORT_HUB.
 
 
 def extract_domain_labels(domain_rows: Optional[Sequence[Sequence[str]]]) -> frozenset[str]:

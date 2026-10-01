@@ -8,6 +8,7 @@ from typing import Awaitable, Callable, Optional, Protocol, Sequence
 
 from aiogram import Bot, types
 
+from ..localization import ChassisScreen
 from ..storage.repositories.referrals import ReferralsRepository
 from ..storage.repositories.subscriptions import SubscriptionsRepository
 from ..storage.repositories.transactions import TransactionsRepository
@@ -89,14 +90,13 @@ class DefaultCabinetSlotsAdapter(CabinetSlotsProviderPort):
 def build_cabinet_renderer(
     adapter: CabinetSlotsProviderPort,
     bot_id: str,
-) -> Callable[[types.Message, int, Bot], Awaitable[Optional[types.Message]]]:
-    async def _render(message: types.Message, user_id: int, bot: Bot) -> Optional[types.Message]:
-        del bot
+) -> Callable[[types.Message, int, Bot], Awaitable[ChassisScreen | None]]:
+    async def _render(message: types.Message, user_id: int, bot: Bot) -> ChassisScreen | None:
+        del message, bot
         slots = await adapter.get_cabinet_slots(bot_id, user_id)
         lines = ["👤 <b>Аккаунт</b>"]
         for slot in slots:
             lines.append(f"<b>{html.escape(slot.title)}</b>\n{html.escape(slot.content)}")
-        text = "\n\n".join(lines)
-        return await message.answer(text, parse_mode="HTML")
+        return ChassisScreen(text="\n\n".join(lines))
 
     return _render

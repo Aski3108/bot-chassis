@@ -199,21 +199,24 @@ async def create_complete_chassis(
         resolved_support_inline = extra_support_inline or ()
         screens = UserScreenTracker()
 
-        async def _on_support_back(message: Message, user_id: int) -> None:
+        async def _deliver_start_card(message: Message, user_id: int) -> None:
             locale = locale_cache.get(user_id) or config.default_locale
-            if render_start_callback is None:
-                if not config.enable_language_switch:
-                    return
-                markup = decorate_info_markup(
-                    None,
-                    MarkupContext(locale=locale, user_id=user_id),
-                )
-                delivered = await message.answer(
-                    _DEFAULT_START_CARD_TEXT,
-                    reply_markup=markup,
-                    parse_mode="HTML",
-                )
+
+            async def _fallback_card() -> None:
+                if config.enable_language_switch:
+                    text = _DEFAULT_START_CARD_TEXT
+                    markup = decorate_info_markup(
+                        None,
+                        MarkupContext(locale=locale, user_id=user_id),
+                    )
+                else:
+                    text = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
+                    markup = None
+                delivered = await message.answer(text, reply_markup=markup, parse_mode="HTML")
                 screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
+
+            if render_start_callback is None:
+                await _fallback_card()
                 return
             rendered = await render_start_callback(
                 StartRenderContext(
@@ -226,17 +229,24 @@ async def create_complete_chassis(
             if isinstance(rendered, Message):
                 screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
                 return
-            if not isinstance(rendered, ChassisScreen):
+            if isinstance(rendered, ChassisScreen):
+                markup = rendered.markup
+                if config.enable_language_switch:
+                    markup = decorate_info_markup(
+                        markup,
+                        MarkupContext(locale=locale, user_id=user_id),
+                    )
+                delivered = await message.answer(
+                    rendered.text,
+                    reply_markup=markup,
+                    parse_mode=rendered.parse_mode,
+                )
+                screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
                 return
-            markup = rendered.markup
-            if config.enable_language_switch:
-                markup = decorate_info_markup(markup, MarkupContext(locale=locale, user_id=user_id))
-            delivered = await message.answer(
-                rendered.text,
-                reply_markup=markup,
-                parse_mode=rendered.parse_mode,
-            )
-            screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
+            await _fallback_card()
+
+        async def _on_support_back(message: Message, user_id: int) -> None:
+            await _deliver_start_card(message, user_id)
 
         dp.include_router(
             _create_start_router(
@@ -245,8 +255,7 @@ async def create_complete_chassis(
                 domain_rows,
                 resolved_pending,
                 screens,
-                render_start_callback=render_start_callback,
-                language_switch_enabled=config.enable_language_switch,
+                deliver_start_card=_deliver_start_card,
             )
         )
         dp.include_router(
@@ -334,8 +343,8 @@ def _create_start_router(
     domain_rows: Sequence[Sequence[str]] | None,
     pending: PendingInputStore,
     screens: UserScreenTracker,
-    render_start_callback: Callable[[StartRenderContext], Awaitable[object]] | None = None,
-    language_switch_enabled: bool = False,
+    *,
+    deliver_start_card: Callable[[Message, int], Awaitable[None]],
 ) -> Router:
     router = Router(name="chassis_start")
 
@@ -350,48 +359,9 @@ def _create_start_router(
             await screens.close_previous_card(message.bot, user_id)
         locale = locale_cache.get(user_id) or config.default_locale
         keyboard = build_main_menu_keyboard(domain_rows=domain_rows, locale=locale)
-        if render_start_callback is None:
-            if not language_switch_enabled:
-                welcome = config.welcome_text if config.welcome_text is not None else _MENU_TEXT
-                await message.answer(welcome, reply_markup=keyboard, parse_mode="HTML")
-                return
-            carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
-            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
-            markup = decorate_info_markup(
-                None,
-                MarkupContext(locale=locale, user_id=user_id),
-            )
-            delivered = await message.answer(
-                _DEFAULT_START_CARD_TEXT,
-                reply_markup=markup,
-                parse_mode="HTML",
-            )
-            screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
-            return
         carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
         await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
-        rendered = await render_start_callback(
-            StartRenderContext(
-                message=message,
-                user_id=user_id,
-                bot=message.bot,
-                locale=locale,
-            )
-        )
-        if isinstance(rendered, Message):
-            screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
-            return
-        if not isinstance(rendered, ChassisScreen):
-            return
-        markup = rendered.markup
-        if language_switch_enabled:
-            markup = decorate_info_markup(markup, MarkupContext(locale=locale, user_id=user_id))
-        delivered = await message.answer(
-            rendered.text,
-            reply_markup=markup,
-            parse_mode=rendered.parse_mode,
-        )
-        screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
+        await deliver_start_card(message, user_id)
 
     return router
 

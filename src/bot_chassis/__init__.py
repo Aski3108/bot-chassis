@@ -28,12 +28,17 @@ from .contracts import (
     MenuLabels,
     CB_SUPPORT_CANCEL,
     CB_NAV_CLOSE,
+    CB_NAV_CANCEL,
+    LABEL_CANCEL_RU,
+    LABEL_BACK_RU,
 )
 from .keyboards import (
     build_main_menu_keyboard,
     build_inline_keyboard,
     build_support_prompt_keyboard,
     build_close_inline_keyboard,
+    append_cancel_row,
+    append_back_row,
 )
 from .lifecycle import (
     UserScreenTracker,
@@ -83,10 +88,15 @@ __all__ = [
     "is_main_menu_button",
     "extract_domain_labels",
     "MenuLabels",
+    "CB_NAV_CANCEL",
+    "LABEL_CANCEL_RU",
+    "LABEL_BACK_RU",
     "build_main_menu_keyboard",
     "build_inline_keyboard",
     "build_support_prompt_keyboard",
     "build_close_inline_keyboard",
+    "append_cancel_row",
+    "append_back_row",
     "UserScreenTracker",
     "CardClosePolicy",
     "close_card_screen",

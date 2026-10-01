@@ -232,8 +232,9 @@ class TestGate12BodyContract(unittest.IsolatedAsyncioTestCase):
         )
         await chassis.dp.feed_update(self.bot, Update(update_id=1, message=_private(8, "/start")))
         texts = [item.text for item in _texts(self.session) if item.__class__.__name__ == "SendMessage"]
-        self.assertEqual(len(texts), 1)
-        self.assertIn("Главное меню", texts[0])
+        self.assertEqual(len(texts), 2)
+        self.assertEqual(texts[0], "Главное меню")
+        self.assertIn("Главное меню", texts[1])
 
     async def test_one_start_one_info_locale_keeps_domain_donations_and_membership(self) -> None:
         starts: list[str] = []
@@ -295,8 +296,10 @@ class TestGate12BodyContract(unittest.IsolatedAsyncioTestCase):
         info_sends = [item for item in _texts(self.session) if item.__class__.__name__ == "SendMessage"]
         self.assertEqual(infos, [11])
         self.assertEqual([item.text for item in info_sends], ["INFO CARD"])
-        toggle = info_sends[0].reply_markup.inline_keyboard[-1][0]
-        self.assertEqual(toggle.callback_data, "core_lang:toggle")
+        rows = info_sends[0].reply_markup.inline_keyboard
+        self.assertEqual(rows[0][0].callback_data, "core_lang:toggle")
+        self.assertEqual(rows[-1][0].callback_data, "core_nav:cancel")
+        toggle = rows[0][0]
 
         card = Message(
             message_id=self.session.requests.index(info_sends[0]) + 1,
@@ -415,7 +418,7 @@ class TestGate12Network(unittest.IsolatedAsyncioTestCase):
             BotChassisConfig(bot_id="solo", db_path=os.path.join(self._tmp.name, "solo.db")),
         )
         await single.dp.feed_update(solo, Update(update_id=1, message=_private(9, "/start")))
-        self.assertEqual(len(_texts(solo.session)), 1)
+        self.assertEqual(len(_texts(solo.session)), 2)
 
         storage = chassis_by_origin["bot-1"].storage
         self.assertEqual((await storage.users.get_user("tenant", 7)).username, "ann")

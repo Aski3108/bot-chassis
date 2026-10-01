@@ -136,7 +136,7 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
         await chassis.dp.feed_update(self.bot, Update(update_id=1, message=message))
         sent = [item for item in self.session.requests if item.__class__.__name__ == "SendMessage" and item.chat_id == 7]
         self.assertTrue(any("Главное меню" in item.text for item in sent))
-        self.assertIsNotNone(sent[-1].reply_markup)
+        self.assertTrue(any(item.reply_markup is not None for item in sent))
 
         self.session.requests.clear()
         ping = Message(
@@ -302,8 +302,8 @@ class TestCompleteChassis(unittest.IsolatedAsyncioTestCase):
             for button in row
         ]
         self.assertNotIn("buy_sku:donate_50", callbacks)
-        self.assertIn("core_sup:cancel", callbacks)
-        self.assertNotIn("core_sup:hub", callbacks)
+        self.assertIn("core_sup:hub", callbacks)
+        self.assertNotIn("core_sup:cancel", callbacks)
         self.assertIn("Psybot", support_card.text)
         self.assertTrue(chassis.pending_store.is_active(7, PendingInputKind.SUPPORT_MESSAGE))
 

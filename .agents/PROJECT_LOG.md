@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-10-01 — Gate U2: канон «Отмена» / «Назад»
+
+**Почему.** Платформенный скелет навигации: корень → Отмена и стартовая
+карточка без Reply Keyboard; вложение → Назад. Решение `d0b170f` отменено.
+
+**Что сделано.** `CB_NAV_CANCEL`, `append_cancel_row` / `append_back_row`;
+обзор Поддержки с «Отмена»; форма тикета снова с «Назад» на `core_sup:hub`;
+единый `handle_nav_close` для close/cancel/back; `core_sup:cancel` → hub;
+`_deliver_start_card` / card-only `Отмена`; кабинет → `ChassisScreen`.
+Тест `test_navigation_canon_cancel_and_back`. Frozen: ожидание cancel→обзор
+(иначе конфликт с каноном). `test_ports_and_middleware` под новый renderer.
+
+**Проверка.** Frozen **19 passed**. Узкий контур U2 зелёный. Полный сьют
+**221 passed**. `compileall` / `git diff --check` чистые. Вторых обработчиков
+`core_sup:back` / `core_sup:cancel` нет.
+
+**Не тронуто.** PsyBot, Chat Listener, Profiling, теги, push. U3 не начат.
+
+---
+
 ## 2026-10-01 — Gate U1: RU-подписи служебной тройки
 
 **Почему.** Пакет `0.3.1`: компактные RU-подписи основной Reply-клавиатуры без

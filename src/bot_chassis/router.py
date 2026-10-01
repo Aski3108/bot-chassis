@@ -37,11 +37,13 @@ from .contracts import (
     CB_SUPPORT_BACK,
     CB_SUPPORT_HUB,
     CB_NAV_CLOSE,
+    CB_NAV_CANCEL,
     CB_SUPPORT_TICKET_CLOSE_PREFIX,
     CB_SUPPORT_TICKET_REOPEN_PREFIX,
     CB_SUPPORT_USER_REPLY_PREFIX,
 )
 from .keyboards import (
+    append_cancel_row,
     build_main_menu_keyboard,
     build_support_prompt_keyboard,
     build_support_overview_keyboard,
@@ -98,8 +100,12 @@ def create_button_chassis_router(
     enable_cabinet: bool = True,
     enable_info: bool = True,
     enable_support: bool = True,
-    render_cabinet_callback: Optional[Callable[[types.Message, int, Bot], Awaitable[Optional[types.Message]]]] = None,
-    render_info_callback: Optional[Callable[[types.Message, int, Bot], Awaitable[Optional[types.Message]]]] = None,
+    render_cabinet_callback: Optional[
+        Callable[[types.Message, int, Bot], Awaitable[types.Message | ChassisScreen | None]]
+    ] = None,
+    render_info_callback: Optional[
+        Callable[[types.Message, int, Bot], Awaitable[types.Message | ChassisScreen | None]]
+    ] = None,
     cabinet_close_policy: CardClosePolicy = CardClosePolicy.DELETE,
     info_close_policy: CardClosePolicy = CardClosePolicy.DELETE,
     get_user_locale: Optional[Callable[[int], str]] = None,
@@ -155,6 +161,61 @@ def create_button_chassis_router(
             return
         await before_chassis_menu_action(user_id)
 
+    _NAV_FALLBACK_CARD = "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:"
+
+    async def _deliver_root_screen(
+        message: types.Message,
+        user_id: int,
+        screen: ChassisScreen,
+        policy: CardClosePolicy,
+        *,
+        with_language: bool,
+    ) -> None:
+        markup = screen.markup
+        if with_language and language_switch_enabled:
+            markup = decorate_info_markup(
+                markup,
+                MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
+            )
+        markup = append_cancel_row(markup)
+        delivered = await message.answer(
+            screen.text,
+            reply_markup=markup,
+            parse_mode=screen.parse_mode,
+        )
+        screens.remember_card(user_id, delivered.chat.id, delivered.message_id, policy=policy)
+
+    async def _ensure_cancel_on_sent_message(
+        sent: types.Message,
+        user_id: int,
+        policy: CardClosePolicy,
+        *,
+        with_language: bool,
+        bot: Bot,
+    ) -> None:
+        markup = sent.reply_markup
+        if with_language and language_switch_enabled:
+            markup = decorate_info_markup(
+                markup,
+                MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
+            )
+        markup = append_cancel_row(markup)
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=sent.chat.id,
+                message_id=sent.message_id,
+                reply_markup=markup,
+            )
+            screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=policy)
+        except Exception:
+            nav = await bot.send_message(
+                sent.chat.id,
+                _NAV_FALLBACK_CARD,
+                reply_markup=append_cancel_row(None),
+                parse_mode="HTML",
+            )
+            screens.remember_card(user_id, nav.chat.id, nav.message_id, policy=policy)
+
     # ----------------------------------------------------------------------
     # 1. КОМАНДА /menu: Восстановление нижней клавиатуры (НЕ УДАЛЯЕТСЯ!)
     # ----------------------------------------------------------------------
@@ -192,22 +253,41 @@ def create_button_chassis_router(
 
                 if render_cabinet_callback:
                     sent = await render_cabinet_callback(message, user_id, message.bot)
-                    if sent and isinstance(sent, types.Message):
-                        screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=cabinet_close_policy)
+                    if isinstance(sent, ChassisScreen):
+                        await _deliver_root_screen(
+                            message,
+                            user_id,
+                            sent,
+                            cabinet_close_policy,
+                            with_language=False,
+                        )
+                    elif sent and isinstance(sent, types.Message):
+                        await _ensure_cancel_on_sent_message(
+                            sent,
+                            user_id,
+                            cabinet_close_policy,
+                            with_language=False,
+                            bot=message.bot,
+                        )
                     else:
                         logger.warning(
-                            f"render_cabinet_callback вернул {type(sent).__name__} вместо aiogram.types.Message. "
-                            f"Экран не зафиксирован в UserScreenTracker и не закроется автоматически."
+                            f"render_cabinet_callback вернул {type(sent).__name__}; "
+                            f"экран кабинета без навигации не зафиксирован."
                         )
                 else:
-                    # Нейтральная карточка шасси (без зашитой коммерции)
-                    sent = await message.answer(
-                        f"👤 <b>Аккаунт</b>\n\n"
-                        f"ID: <code>{user_id}</code>\n"
-                        f"Раздел настроен в шасси.",
-                        parse_mode="HTML",
+                    await _deliver_root_screen(
+                        message,
+                        user_id,
+                        ChassisScreen(
+                            text=(
+                                f"👤 <b>Аккаунт</b>\n\n"
+                                f"ID: <code>{user_id}</code>\n"
+                                f"Раздел настроен в шасси."
+                            )
+                        ),
+                        cabinet_close_policy,
+                        with_language=False,
                     )
-                    screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=cabinet_close_policy)
             finally:
                 tracker.release(user_id, current_task)
 
@@ -231,51 +311,39 @@ def create_button_chassis_router(
                 if render_info_callback:
                     sent = await render_info_callback(message, user_id, message.bot)
                     if isinstance(sent, ChassisScreen):
-                        markup = sent.markup
-                        if language_switch_enabled:
-                            markup = decorate_info_markup(
-                                markup,
-                                MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
-                            )
-                        delivered = await message.answer(
-                            sent.text,
-                            reply_markup=markup,
-                            parse_mode=sent.parse_mode,
-                        )
-                        screens.remember_card(
+                        await _deliver_root_screen(
+                            message,
                             user_id,
-                            delivered.chat.id,
-                            delivered.message_id,
-                            policy=info_close_policy,
+                            sent,
+                            info_close_policy,
+                            with_language=True,
                         )
                     elif sent and isinstance(sent, types.Message):
-                        if language_switch_enabled:
-                            logger.warning(
-                                "render_info_callback уже отправил Message. "
-                                "Языковая кнопка не вставлена. Верните ChassisScreen "
-                                "или вызовите decorate_info_markup до отправки."
-                            )
-                        screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
+                        await _ensure_cancel_on_sent_message(
+                            sent,
+                            user_id,
+                            info_close_policy,
+                            with_language=True,
+                            bot=message.bot,
+                        )
                     else:
                         logger.warning(
-                            f"render_info_callback вернул {type(sent).__name__} вместо aiogram.types.Message. "
-                            f"Экран не зафиксирован в UserScreenTracker и не закроется автоматически."
+                            f"render_info_callback вернул {type(sent).__name__}; "
+                            f"экран Info без навигации не зафиксирован."
                         )
                 else:
-                    markup = None
-                    if language_switch_enabled:
-                        markup = decorate_info_markup(
-                            None,
-                            MarkupContext(locale=_resolve_locale(user_id), user_id=user_id),
-                        )
-                    # Нейтральная двуязычная карточка остаётся корректной после toggle.
-                    sent = await message.answer(
-                        f"ℹ️ <b>Info/FAQ ({project_label})</b>\n\n"
-                        f"Информация о проекте / Project information.",
-                        reply_markup=markup,
-                        parse_mode="HTML",
+                    await _deliver_root_screen(
+                        message,
+                        user_id,
+                        ChassisScreen(
+                            text=(
+                                f"ℹ️ <b>Info/FAQ ({project_label})</b>\n\n"
+                                f"Информация о проекте / Project information."
+                            )
+                        ),
+                        info_close_policy,
+                        with_language=True,
                     )
-                    screens.remember_card(user_id, sent.chat.id, sent.message_id, policy=info_close_policy)
             finally:
                 tracker.release(user_id, current_task)
 
@@ -304,10 +372,7 @@ def create_button_chassis_router(
             )
 
         def _request_markup() -> types.InlineKeyboardMarkup:
-            return build_support_prompt_keyboard(
-                cancel_callback=CB_SUPPORT_CANCEL,
-                extra_rows=extra_support_inline,
-            )
+            return build_support_prompt_keyboard(extra_rows=extra_support_inline)
 
         def _overview_text() -> str:
             return (
@@ -319,7 +384,7 @@ def create_button_chassis_router(
             return (
                 f"💬 <b>Служба поддержки ({project_label})</b>\n\n"
                 "Можно отправить текст, изображение, видео, голосовое сообщение или документ.\n\n"
-                "<i>Отмена или пункт меню сбрасывают ожидание.</i>"
+                "<i>Назад или пункт меню сбрасывают ожидание.</i>"
             )
 
         def _review_text() -> str:
@@ -334,17 +399,39 @@ def create_button_chassis_router(
 
         async def _edit_or_answer(event: types.Message | types.CallbackQuery, text: str, markup) -> None:
             user_id = event.from_user.id if event.from_user else 0
-            if isinstance(event, types.CallbackQuery) and event.message:
+            bot = event.bot
+            if isinstance(event, types.CallbackQuery) and event.message is not None and bot is not None:
                 try:
-                    await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+                    await bot.edit_message_text(
+                        text,
+                        chat_id=event.message.chat.id,
+                        message_id=event.message.message_id,
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
                     await _remember(user_id, event.message)
                     return
                 except Exception:
-                    pass
+                    sent = await bot.send_message(
+                        event.message.chat.id,
+                        text,
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
+                    await _remember(user_id, sent)
+                    return
             target = event.message if isinstance(event, types.CallbackQuery) else event
             if target is None:
                 return
-            sent = await target.answer(text, reply_markup=markup, parse_mode="HTML")
+            if bot is not None:
+                sent = await bot.send_message(
+                    target.chat.id,
+                    text,
+                    reply_markup=markup,
+                    parse_mode="HTML",
+                )
+            else:
+                sent = await target.answer(text, reply_markup=markup, parse_mode="HTML")
             await _remember(user_id, sent)
 
         async def _open_overview(event: types.Message | types.CallbackQuery, *, run_hook: bool = True) -> None:
@@ -421,7 +508,7 @@ def create_button_chassis_router(
                 await query.answer()
                 await _open_review(query, run_hook=False)
 
-        @router.callback_query(F.data == CB_SUPPORT_HUB)
+        @router.callback_query(F.data.in_({CB_SUPPORT_HUB, CB_SUPPORT_CANCEL}))
         async def handle_support_hub(query: types.CallbackQuery):
             await query.answer()
             await _open_overview(query, run_hook=False)
@@ -438,32 +525,6 @@ def create_button_chassis_router(
             markup = build_donation_keyboard(donate_rows)
             await query.answer()
             await _edit_or_answer(query, text, markup)
-
-        @router.callback_query(F.data == CB_SUPPORT_BACK)
-        async def handle_support_back(query: types.CallbackQuery):
-            user_id = query.from_user.id if query.from_user else 0
-            pending.clear(user_id)
-            screens.forget_card(user_id)
-            await query.answer()
-            if query.message:
-                try:
-                    await query.message.delete()
-                except Exception:
-                    await query.message.edit_reply_markup(reply_markup=None)
-            if on_support_back is not None and query.message is not None:
-                await on_support_back(query.message, user_id)
-
-        @router.callback_query(F.data == CB_SUPPORT_CANCEL)
-        async def handle_support_cancel(query: types.CallbackQuery):
-            user_id = query.from_user.id if query.from_user else 0
-            pending.clear(user_id)
-            screens.forget_card(user_id)
-            await query.answer("Обращение отменено")
-            if query.message:
-                try:
-                    await query.message.delete()
-                except Exception:
-                    await query.message.edit_reply_markup(reply_markup=None)
 
         @router.callback_query(F.data.startswith(CB_SUPPORT_USER_REPLY_PREFIX))
         async def handle_support_user_reply(query: types.CallbackQuery):
@@ -492,7 +553,7 @@ def create_button_chassis_router(
                 (
                     f"💬 <b>Ответ в обращение</b>\n\n"
                     "Можно отправить текст, изображение, видео, голосовое сообщение или документ.\n\n"
-                    "<i>Сообщение уйдёт в тот же диалог. Отмена сбрасывает ожидание.</i>"
+                    "<i>Сообщение уйдёт в тот же диалог. Назад сбрасывает ожидание.</i>"
                 ),
                 _request_markup(),
             )
@@ -532,8 +593,9 @@ def create_button_chassis_router(
     # ----------------------------------------------------------------------
     # 5. ОБЩИЕ ИНЛАЙН-ОБРАБОТЧИКИ
     # ----------------------------------------------------------------------
-    @router.callback_query(F.data == CB_NAV_CLOSE)
+    @router.callback_query(F.data.in_({CB_NAV_CLOSE, CB_NAV_CANCEL, CB_SUPPORT_BACK}))
     async def handle_nav_close(query: types.CallbackQuery):
+        data = query.data or ""
         user_id = query.from_user.id if query.from_user else 0
         screens.forget_card(user_id)
         await query.answer()
@@ -542,6 +604,14 @@ def create_button_chassis_router(
                 await query.message.delete()
             except Exception:
                 await query.message.edit_reply_markup(reply_markup=None)
+        if data == CB_NAV_CLOSE:
+            return
+        pending.clear(user_id)
+        if on_support_back is not None and query.message is not None:
+            await on_support_back(query.message, user_id)
+            return
+        if query.message is not None:
+            await query.message.answer(_NAV_FALLBACK_CARD, parse_mode="HTML")
 
     # ----------------------------------------------------------------------
     # 6. ПРИЁМ ТИКЕТА ПОЛЬЗОВАТЕЛЯ (СТРОГИЙ ФИЛЬТР! Никакого голого router.message)
