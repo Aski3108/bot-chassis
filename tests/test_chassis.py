@@ -205,11 +205,12 @@ class TestButtonChassisUnit(unittest.TestCase):
         args, kwargs = bot.set_my_commands.call_args
         commands = kwargs.get("commands") or args[0]
         cmd_names = [c.command for c in commands]
-        self.assertEqual(cmd_names, ["menu"])
-        self.assertEqual(commands[0].description, "📱 Восстановить кнопки меню")
+        self.assertEqual(cmd_names, ["start", "menu"])
+        self.assertEqual(commands[0].description, "Старт / Start")
+        self.assertEqual(commands[-1].description, "Меню / Menu")
 
     def test_setup_bot_commands_merges_custom_commands(self):
-        """Проверка, что кастомные команды дополняют команды шасси, а не стирают их."""
+        """Проверка, что кастомные команды встают между /start и /menu."""
         bot = Mock(spec=Bot)
         bot.set_my_commands = AsyncMock()
         custom = [types.BotCommand(command="detect", description="AI Detector")]
@@ -219,8 +220,7 @@ class TestButtonChassisUnit(unittest.TestCase):
         args, kwargs = bot.set_my_commands.call_args
         commands = kwargs.get("commands") or args[0]
         cmd_names = [c.command for c in commands]
-        self.assertEqual(cmd_names, ["menu", "detect"])
-        self.assertNotIn("start", cmd_names)
+        self.assertEqual(cmd_names, ["start", "detect", "menu"])
         self.assertNotIn("help", cmd_names)
         self.assertNotIn("support", cmd_names)
 

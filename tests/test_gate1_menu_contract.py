@@ -137,9 +137,48 @@ class TestGate1MenuContract(unittest.IsolatedAsyncioTestCase):
         )
         commands = bot.set_my_commands.await_args.args[0]
         self.assertEqual([(item.command, item.description) for item in commands], [
-            ("menu", "📱 Восстановить кнопки меню"),
+            ("start", "Старт / Start"),
             ("detect", "Проверить"),
+            ("menu", "Меню / Menu"),
         ])
+
+    async def test_blue_menu_command_order(self) -> None:
+        bot = AsyncMock()
+        await setup_bot_commands(
+            bot,
+            custom_commands=[
+                BotCommand(command="start", description="body start"),
+                BotCommand(command="menu", description="body menu"),
+                BotCommand(command="help", description="body help"),
+                BotCommand(command="support", description="body support"),
+                BotCommand(command="work", description="Первое"),
+                BotCommand(command="work", description="Второе"),
+            ],
+        )
+        commands = bot.set_my_commands.await_args.args[0]
+        self.assertEqual(commands[0].command, "start")
+        self.assertEqual(commands[0].description, "Старт / Start")
+        self.assertEqual(commands[-1].command, "menu")
+        self.assertEqual(commands[-1].description, "Меню / Menu")
+        middle = commands[1:-1]
+        self.assertEqual([(item.command, item.description) for item in middle], [
+            ("work", "Первое"),
+        ])
+        names = [item.command for item in commands]
+        self.assertNotIn("help", names)
+        self.assertNotIn("support", names)
+
+        bot2 = AsyncMock()
+        await setup_bot_commands(
+            bot2,
+            custom_commands=[
+                BotCommand(command="zeta", description="Z"),
+                BotCommand(command="alpha", description="A"),
+                BotCommand(command="middle", description="M"),
+            ],
+        )
+        ordered = [item.command for item in bot2.set_my_commands.await_args.args[0]]
+        self.assertEqual(ordered, ["start", "zeta", "alpha", "middle", "menu"])
 
     async def test_info_click_sends_one_card_for_new_and_legacy_labels(self) -> None:
         calls: list[str] = []

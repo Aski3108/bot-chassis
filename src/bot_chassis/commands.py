@@ -21,19 +21,23 @@ async def setup_bot_commands(
 ) -> None:
     """
     Регистрирует список команд в Telegram Bot API.
-    Гарантирует доступность синей кнопки «Меню» в клиенте Telegram для всех пользователей.
+    Порядок: /start сверху, доменные кузова в середине, /menu внизу.
+    Один набор с двуязычными подписями; language_code не используется.
     """
-    default_commands = [
-        BotCommand(command="menu", description="📱 Восстановить кнопки меню"),
-    ]
-    commands_map = {c.command: c for c in default_commands}
+    head = [BotCommand(command="start", description="Старт / Start")]
+    middle: list[BotCommand] = []
+    seen: set[str] = set()
     if custom_commands:
         for cmd in custom_commands:
             command_name = cmd.command.lstrip("/").casefold()
             if command_name in _RESERVED_COMMANDS:
                 continue
-            commands_map[command_name] = cmd
-    commands = list(commands_map.values())
+            if command_name in seen:
+                continue
+            seen.add(command_name)
+            middle.append(cmd)
+    tail = [BotCommand(command="menu", description="Меню / Menu")]
+    commands = head + middle + tail
     try:
         await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
         logger.info(f"✅ Команды бота ({len(commands)}) успешно зарегистрированы через set_my_commands.")
