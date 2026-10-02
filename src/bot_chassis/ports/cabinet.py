@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional, Protocol, Sequence
+from typing import Awaitable, Callable, Protocol, Sequence
 
 from aiogram import Bot, types
 

@@ -88,6 +88,8 @@ __all__ = [
     "is_main_menu_button",
     "extract_domain_labels",
     "MenuLabels",
+    "CB_SUPPORT_CANCEL",
+    "CB_NAV_CLOSE",
     "CB_NAV_CANCEL",
     "LABEL_CANCEL_RU",
     "LABEL_BACK_RU",

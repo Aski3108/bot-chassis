@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from .config import BotChassisConfig, resolved_origin
+from .config import BotChassisConfig
 from .policies import BACKUP_JOB_KEY, REPORT_JOB_KEY, BackupPolicy, ReportingPolicy
 from .reports import (
     as_utc_stamp,

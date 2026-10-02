@@ -13,7 +13,7 @@
 from __future__ import annotations
 import asyncio
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional
 from aiogram import types, Bot
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError

@@ -18,7 +18,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InaccessibleMessage,
     Message,
 )
 from aiogram.types import BufferedInputFile, FSInputFile
