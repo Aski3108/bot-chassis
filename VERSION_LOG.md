@@ -5,19 +5,21 @@
 
 ---
 
-## v0.3.1 — 2026-10-01 (на `feat/chassis-0.3`, тег не ставился)
+## v0.3.1 — 2026-10-02
 
 | Поле | Значение |
 |---|---|
-| Tag | не ставился |
-| Branch | `feat/chassis-0.3` |
+| Tag | локальный аннотированный `v0.3.1`; target = release-handoff коммит с этой записью |
+| Branch | `main` |
 | Implementation HEAD | `4955784` `feat: Gate S3 add operator dialog history from message metadata` |
+| Public docs | `134334d` `docs: polish chassis 0.3.1 release guides` |
+| Release cleanup | `ede4ef5` `fix(lint): clean chassis public imports` |
 | Previous | `0.3.0` landing `7fe5d93`; `BASE_REF` пакета `d3c79cd` |
 | Profiling hold | tag `profiling` = `6823f30` (не двигался) |
 | Why | UI/навигация/поддержка 0.3.1: RU-лейблы, Отмена/Назад, синее меню start→domain→menu, автор тикета, один ответ оператора, история по метаданным |
 | Touched | contracts/keyboards/commands/router/support_bridge/sqlite store/schema; docs CHASSIS + spec; CHANGELOG/pyproject 0.3.1; frozen U1/U3/S2 по разрешению владельца |
-| Consumers | Profiling не переключать; PsyBot handoff §4.1 — в `tg_psy_tests`, не из этой рамы |
-| Push | нет |
+| Consumers | переключать только отдельным immutable SHA после contract-тестов потребителя |
+| Push | release-cleanup и новый tag локальные; push не выполнялся |
 
 Коммиты пакета после `BASE_REF=d3c79cd` (код до S3; control-plane C0 и легализация frozen — отдельно):
 
