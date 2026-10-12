@@ -70,6 +70,7 @@ class CompleteChassis:
     referrals: ReferralPort
     cabinet: CabinetSlotsProviderPort
     locale_cache: dict[int, str]
+    screens: UserScreenTracker
     thread_store: object | None = None
     pending_store: PendingInputStore | None = None
 
@@ -186,6 +187,7 @@ async def create_complete_chassis(
     if domain_router is not None:
         dp.include_router(domain_router)
     resolved_thread_store = thread_store
+    screens = UserScreenTracker()
     if config.enable_buttons:
         if resolved_thread_store is None:
             if config.db_path and config.db_path != ":memory:":
@@ -198,7 +200,6 @@ async def create_complete_chassis(
             else:
                 resolved_thread_store = SupportThreadStore()
         resolved_support_inline = extra_support_inline or ()
-        screens = UserScreenTracker()
 
         async def _deliver_start_card(message: Message, user_id: int) -> None:
             locale = locale_cache.get(user_id) or config.default_locale
@@ -338,6 +339,7 @@ async def create_complete_chassis(
         referrals=referrals,
         cabinet=cabinet,
         locale_cache=locale_cache,
+        screens=screens,
         thread_store=resolved_thread_store,
         pending_store=resolved_pending,
     )

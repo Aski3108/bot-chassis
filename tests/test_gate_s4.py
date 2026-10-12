@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import os
 import tempfile
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
@@ -17,8 +19,8 @@ from aiogram.types import CallbackQuery, Chat, InaccessibleMessage, Message, Upd
 
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.contracts import CB_NAV_CLOSE
-from bot_chassis.factory import create_complete_chassis
-from bot_chassis.lifecycle import UserScreenTracker
+from bot_chassis.factory import CompleteChassis, create_complete_chassis
+from bot_chassis.lifecycle import CardClosePolicy, UserScreenTracker, close_card_screen
 from bot_chassis.router import create_button_chassis_router
 from bot_chassis.service_notify import deliver_startup_notification
 from bot_chassis.storage.sqlite_support_thread_store import SupportTicketMessage
@@ -248,7 +250,11 @@ class TestSupportHistoryClose(unittest.IsolatedAsyncioTestCase):
             ),
             edit_error=RuntimeError("markup edit failed"),
         )
-        await _press_close(broken, UserScreenTracker(), "core_nav:close")
+        with patch("bot_chassis.lifecycle.logger.debug") as debug_log:
+            await _press_close(broken, UserScreenTracker(), "core_nav:close")
+        self.assertTrue(
+            any("Не удалось снять кнопки" in str(call) for call in debug_log.call_args_list)
+        )
 
     async def _assert_delete_fallback(self, error: Exception) -> None:
         session = _CloseSession(delete_error=error)
@@ -295,3 +301,121 @@ async def _press_close(
         )
     finally:
         await bot.session.close()
+
+
+class TestRetireActiveScreen(unittest.IsolatedAsyncioTestCase):
+    async def test_retire_active_screen_forgets_before_await(self) -> None:
+        tracker = UserScreenTracker()
+        tracker.remember_card(7, 99, 5, CardClosePolicy.DELETE)
+        seen: dict[str, object] = {}
+
+        async def wrapped(bot, chat_id, message_id, policy=CardClosePolicy.DELETE):
+            seen["card"] = tracker.get_card(7)
+            seen["chat_id"] = chat_id
+            seen["message_id"] = message_id
+            seen["policy"] = policy
+            await close_card_screen(bot, chat_id, message_id, policy=policy)
+
+        bot = AsyncMock()
+        with patch("bot_chassis.lifecycle.close_card_screen", wrapped):
+            await tracker.retire_active_screen(bot, 7)
+        self.assertIsNone(seen["card"])
+        self.assertEqual(seen["chat_id"], 99)
+        self.assertEqual(seen["message_id"], 5)
+        self.assertEqual(seen["policy"], CardClosePolicy.DROP_MARKUP)
+        bot.delete_message.assert_not_awaited()
+        bot.edit_message_reply_markup.assert_awaited_once_with(
+            chat_id=99,
+            message_id=5,
+            reply_markup=None,
+        )
+
+    async def test_retire_active_screen_is_idempotent(self) -> None:
+        empty = UserScreenTracker()
+        quiet = AsyncMock()
+        await empty.retire_active_screen(quiet, 7)
+        quiet.delete_message.assert_not_awaited()
+        quiet.edit_message_reply_markup.assert_not_awaited()
+
+        tracker = UserScreenTracker()
+        tracker.remember_card(7, 99, 5, CardClosePolicy.DELETE)
+        calls: list[dict] = []
+
+        async def slow_edit(**kwargs):
+            await asyncio.sleep(0.02)
+            calls.append(kwargs)
+
+        bot = AsyncMock()
+        bot.edit_message_reply_markup.side_effect = slow_edit
+        await asyncio.gather(
+            tracker.retire_active_screen(bot, 7),
+            tracker.retire_active_screen(bot, 7),
+        )
+        self.assertEqual(calls, [{"chat_id": 99, "message_id": 5, "reply_markup": None}])
+        bot.delete_message.assert_not_awaited()
+        await tracker.retire_active_screen(bot, 7)
+        self.assertEqual(len(calls), 1)
+
+    async def test_screens_exists_when_buttons_disabled(self) -> None:
+        created: list[UserScreenTracker] = []
+        real = UserScreenTracker
+
+        class Recording(real):
+            def __init__(self) -> None:
+                super().__init__()
+                created.append(self)
+
+        tmp = tempfile.TemporaryDirectory()
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        try:
+            config = BotChassisConfig(
+                bot_id="bot_a",
+                db_path=os.path.join(tmp.name, "chassis.db"),
+                enable_buttons=False,
+                enable_admin=False,
+                enable_payments=False,
+            )
+            with patch("bot_chassis.factory.UserScreenTracker", Recording):
+                chassis = await create_complete_chassis(bot, config)
+            self.assertEqual(len(created), 1)
+            self.assertIs(chassis.screens, created[0])
+            self.assertIsInstance(chassis.screens, UserScreenTracker)
+        finally:
+            await bot.session.close()
+            tmp.cleanup()
+
+    async def test_complete_chassis_dataclass_has_required_screens_before_default_fields(self) -> None:
+        fields = dataclasses.fields(CompleteChassis)
+        names = [field.name for field in fields]
+        screens_index = names.index("screens")
+        self.assertEqual(screens_index, names.index("locale_cache") + 1)
+        self.assertLess(screens_index, names.index("thread_store"))
+        self.assertLess(screens_index, names.index("pending_store"))
+        self.assertIs(fields[screens_index].default, dataclasses.MISSING)
+
+        created: list[UserScreenTracker] = []
+        real = UserScreenTracker
+
+        class Recording(real):
+            def __init__(self) -> None:
+                super().__init__()
+                created.append(self)
+
+        tmp = tempfile.TemporaryDirectory()
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        try:
+            config = BotChassisConfig(
+                bot_id="bot_a",
+                db_path=os.path.join(tmp.name, "chassis.db"),
+                enable_admin=False,
+                enable_payments=False,
+            )
+            with patch("bot_chassis.factory.UserScreenTracker", Recording):
+                chassis = await create_complete_chassis(bot, config)
+            self.assertEqual(len(created), 1)
+            self.assertIs(chassis.screens, created[0])
+        finally:
+            await bot.session.close()
+            tmp.cleanup()

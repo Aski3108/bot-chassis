@@ -227,6 +227,11 @@ async def before_chassis_menu_action(user_id: int) -> None:
 Не использовать hook как глобальный `reset_all`: один пользователь не должен
 сбросить сбор сообщений или диалоги остальных.
 
+Перед открытием собственного экрана Listener вызывает
+`await chassis.screens.retire_active_screen(bot, user_id)`. Метод снимает
+кнопки последней карточки рамы и не заменяет `before_chassis_menu_action`.
+Этот паспорт не означает, что репозиторий Listener уже переведён.
+
 ---
 
 ## 5. L2: расширенное досье `/user`

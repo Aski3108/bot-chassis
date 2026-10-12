@@ -254,7 +254,7 @@ RU: `[👤 Аккаунт] [ℹ️ Инфо/FAQ] [Поддержка]`; EN: `[�
 `append_cancel_row` / `append_back_row`.
 SQLite-тикет не закрывается первым ответом: оператор отвечает несколько раз, пользователь жмёт «Ответить поддержке», слот освобождает только «Закрыть обращение». JSON-store по-прежнему одноразовый.
 Отзыв (если есть `review_sink`) принимает текст или одно медиа, спрашивает согласие на публикацию и уходит в очередь модерации без копирования содержимого в SQLite. Суперадмин публикует или отклоняет один раз; после публикации пользователь получает прямую ссылку.
-Карточки: `UserScreenTracker`, `CardClosePolicy`.  
+Карточки: `UserScreenTracker`, `CardClosePolicy`. Кузов перед своим экраном вызывает `await chassis.screens.retire_active_screen(bot, user_id)`: запись забывается до сети, кнопки снимаются политикой `DROP_MARKUP`, текст остаётся. Повторный вызов ничего не отправляет. Поле `screens` есть и при `enable_buttons=False` и совпадает с tracker роутеров. `before_chassis_menu_action` по-прежнему вызывается только рамой при входе в её меню.
 Ввод: `PendingInputStore`, TTL 15 мин. Фабрика принимает внешний `pending_store` или создаёт штатный; тот же экземпляр отдаётся start-router, button-router и `CompleteChassis.pending_store`. `before_chassis_menu_action(user_id)` вызывается перед открытием Кабинета, Info и Поддержки (для поддержки — строго до `pending.set`); `None` — ничего не вызывать.  
 Клики: `ActiveTaskTracker`.
 Мост поддержки: при постоянном `db_path` и `thread_store=None` фабрика сама

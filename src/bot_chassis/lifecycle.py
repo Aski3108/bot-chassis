@@ -53,6 +53,20 @@ class UserScreenTracker:
         """Удаляет запись о карточке из памяти трекера."""
         self._cards.pop(user_id, None)
 
+    async def retire_active_screen(self, bot: Bot, user_id: int) -> None:
+        """Снимает кнопки последней карточки. Повторный вызов ничего не шлёт."""
+        entry = self.get_card(user_id)
+        if entry is None:
+            return
+        chat_id, message_id, _old_policy = entry
+        self.forget_card(user_id)
+        await close_card_screen(
+            bot,
+            chat_id,
+            message_id,
+            policy=CardClosePolicy.DROP_MARKUP,
+        )
+
     async def close_previous_card(
         self,
         bot: Bot,
@@ -100,8 +114,10 @@ async def close_card_screen(
                 message_id=message_id,
                 reply_markup=None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"Не удалось снять кнопки сообщения {chat_id}:{message_id}: {e}"
+            )
 
     try:
         await asyncio.wait_for(_close(), timeout=timeout)
