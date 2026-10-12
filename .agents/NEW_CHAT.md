@@ -17,8 +17,11 @@
 7. `.agents/AUDIT_LOG_0_3.md` — история аудитов, находок и их закрытия;
 8. `.agents/UPGRADE_0_3_PLAN.md` — технические критерии Gate `0.3`;
 9. `.agents/UPGRADE_0_3_1_PLAN.md` — технические критерии Gate `0.3.1`;
-10. `docs/CHASSIS.md` — канон рамы, не backlog;
-11. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
+10. `.agents/ADMIN_REDESIGN_SPEC.md` — утверждённая архитектурная спецификация редизайна админки, досье и отчётов;
+11. `.agents/UPGRADE_2_0_PLAN_AUDIT.md` — единственный технический план Release 2.0;
+12. `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md` — независимые проверки B1–B6;
+13. `docs/CHASSIS.md` — канон рамы, не backlog;
+14. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
 
 ## Главные ограничения
 
@@ -60,21 +63,18 @@ Git-тег `v0.3.0` не ставился. Tag `profiling` не двигался
 - порядок и статусы Gate: `.agents/TASK_TODO.md`;
 - технический план `0.3`: `.agents/UPGRADE_0_3_PLAN.md`;
 - единственный технический план `0.3.1`: `.agents/UPGRADE_0_3_1_PLAN.md`;
+- архитектурная спецификация редизайна админки: `.agents/ADMIN_REDESIGN_SPEC.md`;
+- единственный технический план Release 2.0: `.agents/UPGRADE_2_0_PLAN_AUDIT.md`;
+- аудит реализации Release 2.0: `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`;
 - состояние: `.agents/SESSION_STATE.md`;
 - история аудитов и текущий handoff: `.agents/AUDIT_LOG_0_3.md`;
 - канон: `docs/CHASSIS.md`;
 - версии: `VERSION_LOG.md`, `CHANGELOG.md`.
 
-Пакет `0.3.1` и сквозной B7 завершены. Последующий release-аудит нашёл
-преждевременный тег, несинхронные журналы и шесть F401. Публичные гайды
-зафиксированы в `134334d`, F401 закрыты в `ede4ef5`, control plane
-синхронизирован. Полный прогон: **244 passed**, frozen: **19 passed**,
-compileall и F401 чистые.
+Пакет `0.3.1` и сквозной B7 завершены. Все тесты зелёные: **244 passed**, frozen: **19 passed**.
+2026-10-10 проведён живой аудит админки владельцем. Все указания и эталонные макеты
+экранов зафиксированы в `.agents/ADMIN_REDESIGN_SPEC.md`.
 
-Локальный `v0.3.1` указывает на финальный release-handoff коммит. Push не
-выполнялся. Tag `profiling` не двигался. Ops Sidecar записан отдельным будущим
-треком и не входит в релиз.
-
-**Следующее действие:** по отдельной команде закрепить SHA у потребителя и
-перейти к live/crash runbook. Gate 13, push, live Telegram smoke и системные
-рестарты самостоятельно не открывать.
+**Следующее действие:** S4-A и S4-B идут отдельным кодовым коммитом после
+planning-base; S4-C завершает пакет B1. P1 не начинать до PASS B1.
+Контракт — `.agents/UPGRADE_2_0_PLAN_AUDIT.md`.

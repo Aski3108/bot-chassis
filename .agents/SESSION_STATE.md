@@ -1,6 +1,6 @@
 # SESSION_STATE — передача сессии Bot Chassis
 
-**Дата:** 2026-10-02
+**Дата:** 2026-10-12
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `main`
 **Версия:** `0.3.1`
@@ -23,22 +23,24 @@
 `134334d`. Ops Sidecar записан как будущая инициатива в
 `.agents/OPS_SIDECAR_CONCEPT.md`; в `0.3.1` он не входит.
 
+Release 2.0 идёт по `.agents/UPGRADE_2_0_PLAN_AUDIT.md`. Planning/control
+plane отделяется от кодового диапазона B1; S4-A/B/C реализованы отдельными
+кодовыми коммитами. Версия
+пакета остаётся `0.3.1`. Целевая `2.0.0` выставляется только в Gate R2
+после PASS аудитов B1–B5.
+
 ## Проверка
 
-- `python -m pytest tests -q` → **244 passed**;
+- `python -m pytest tests -q` → **257 passed** после S4-C;
 - `python -m pytest tests/test_chassis.py -q` → **19 passed**;
-- `python -m compileall -q src tests` → чисто;
-- `python -m ruff check src --select F401` → чисто;
-- `git diff --check` → чисто перед release-handoff.
+- `python -m compileall -q src tests` → чисто.
 
 ## Следующее действие
 
-1. Не push и не запускать live Telegram smoke без отдельной команды.
-2. Для потребителя сначала закрепить новый immutable SHA рамы и прогнать его
-   mount/contract тесты.
-3. Затем открыть отдельный live/crash runbook: старт, меню, поддержка,
-   платежный sandbox, рестарт процесса и восстановление после аварии.
-4. Gate 13 и Ops Sidecar не открывать вместе с live smoke `0.3.1`.
+1. S4-C ждёт отдельного разрешения на коммит. P1 не начинать.
+2. После коммита S4-C провести независимый B1.
+3. Не push и не запускать live Telegram smoke без отдельной команды.
+4. Gate 13, payment-delivery queue и Ops Sidecar не смешивать с Release 2.0.
 
 ## Жёсткие границы
 

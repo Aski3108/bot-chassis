@@ -112,6 +112,38 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
 
 ---
 
+## Исполняемая очередь Release 2.0 — хирургическое обновление рамы
+
+Добавлено владельцем 2026-10-12. Единственный технический контракт —
+`.agents/UPGRADE_2_0_PLAN_AUDIT.md`. Независимая проверка —
+`.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`. Исполнять строго по одному Gate;
+следующий Gate и commit требуют отдельной команды владельца.
+
+- [x] **S4-A.** Один startup-alert: audit destination → первый superadmin, без support fallback и массовой рассылки.
+- [x] **S4-B.** Кнопка `Закрыть` и безопасное закрытие истории поддержки.
+- [ ] **S4-C.** Публичный `chassis.screens.retire_active_screen(bot, user_id)`.
+- [ ] **B1.** Независимый аудит S4-A–S4-C — `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`.
+- [ ] **P1.** Постоянная безопасная отмена Stars-инвойса.
+- [ ] **P2.** Однострочные слоты кабинета.
+- [ ] **P3.** Обратно совместимый `single_message_start=False`.
+- [ ] **B2.** Независимый аудит P1–P3.
+- [ ] **A0.** Новое admin/DB menu и единый root guard с throttled security audit.
+- [ ] **A6.** Точный экран статистики на корректных tenant/bot данных.
+- [ ] **B3.** Независимый аудит A0 + A6.
+- [ ] **A1.** Точное досье и Stay-in-Dossier.
+- [ ] **A2.** Явное подменю санкций и мгновенное снятие санкций.
+- [ ] **A3.** Причина full/shadow ban через единый `PendingInputStore`; миграция `shadow_ban_reason`.
+- [ ] **A4.** Root-only управление подарочной подпиской и токеном.
+- [ ] **B4.** Независимый аудит A1–A4.
+- [ ] **A5.** Stateless-список пользователей по 15 записей и максимум 5 цифровых кнопок в ряду.
+- [ ] **A7.** Безопасный default backup и человекочитаемые audit/report/backup карточки.
+- [ ] **B5.** Независимый аудит A5 + A7.
+- [ ] **R2. Обновить спецификацию и канон шасси.** После PASS B1–B5 синхронизировать `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md` и `.agents/ADMIN_REDESIGN_SPEC.md`; поднять `pyproject.toml` до `2.0.0`, добавить `CHANGELOG.md` и release-тесты. Не объявлять соседние кузова мигрированными.
+- [ ] **B6. Финальный независимый аудит Release 2.0.** Полный diff, security/data/async/migration/dead-code/docs/version проверки и полный suite; frozen — ровно 19.
+- [ ] **Release 2.0 closeout.** Только после PASS B6 записать фактические результаты в `TASK_TODO`, `ACTIVE_PLANS`, `SESSION_STATE`, `PROJECT_LOG`; `VERSION_LOG` менять только при реально принятом HEAD/tag; затем пройти B6-CLOSEOUT. Commit/tag/push/live smoke — только отдельными командами владельца.
+
+---
+
 ## Отложено: очередь доставки оплаты (будущий пакет рамы)
 
 Источник: план Listener `docs/MIGRATION_PLAN.md`, шаг 5.2-А. Перенесено

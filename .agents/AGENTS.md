@@ -14,7 +14,8 @@
 - Coding-чат реализует ровно один подтверждённый Gate из
   `.agents/TASK_TODO.md`; технические критерии Gate берёт из соответствующего
   принятого плана: для `0.3` — `.agents/UPGRADE_0_3_PLAN.md`, для `0.3.1` —
-  `.agents/UPGRADE_0_3_1_PLAN.md`.
+  `.agents/UPGRADE_0_3_1_PLAN.md`, для Release 2.0 —
+  `.agents/UPGRADE_2_0_PLAN_AUDIT.md`.
 - Не прыгать через Gate. Соседние «улучшения» и скрытые фиксы запрещены.
 - Аудит соседнего кузова (Profiling, PsyBot, Chat Listener) этот репозиторий
   не заменяет и из этого корня не запускает.
@@ -29,9 +30,12 @@
 6. `.agents/TASK_TODO.md`
 7. `.agents/UPGRADE_0_3_PLAN.md` — если работа относится к `0.3`
 8. `.agents/UPGRADE_0_3_1_PLAN.md` — если работа относится к `0.3.1`
-9. Канон рамы — `docs/CHASSIS.md`
-10. `.agents/PROJECT_LOG.md` — только последние релевантные записи
-11. Если сдвинулась версия или тег — `VERSION_LOG.md` и `CHANGELOG.md`
+9. `.agents/ADMIN_REDESIGN_SPEC.md` — архитектурная спецификация редизайна админки, досье и отчётов
+10. `.agents/UPGRADE_2_0_PLAN_AUDIT.md` — если работа относится к Release 2.0
+11. `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md` — только для независимого аудита Release 2.0
+12. Канон рамы — `docs/CHASSIS.md`
+13. `.agents/PROJECT_LOG.md` — только последние релевантные записи
+14. Если сдвинулась версия или тег — `VERSION_LOG.md` и `CHANGELOG.md`
 
 ## Обязательные правила
 
