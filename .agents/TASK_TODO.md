@@ -121,8 +121,8 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
 
 - [x] **S4-A.** Один startup-alert: audit destination → первый superadmin, без support fallback и массовой рассылки.
 - [x] **S4-B.** Кнопка `Закрыть` и безопасное закрытие истории поддержки.
-- [ ] **S4-C.** Публичный `chassis.screens.retire_active_screen(bot, user_id)`.
-- [ ] **B1.** Независимый аудит S4-A–S4-C — `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`.
+- [x] **S4-C.** Публичный `chassis.screens.retire_active_screen(bot, user_id)`. Коммит `e8084e3`.
+- [x] **B1.** Независимый аудит S4-A–S4-C — PASS по сообщению владельца 2026-10-12.
 - [ ] **P1.** Постоянная безопасная отмена Stars-инвойса.
 - [ ] **P2.** Однострочные слоты кабинета.
 - [ ] **P3.** Обратно совместимый `single_message_start=False`.
