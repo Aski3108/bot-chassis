@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from aiogram.types import LabeledPrice
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 
 from ..config import BotChassisConfig
 
 _PAYLOAD_LIMIT = 128
+CB_PAY_CANCEL = "chassis:pay:cancel"
 
 
 class InvoiceError(Exception):
@@ -66,5 +67,11 @@ async def send_sku_invoice(bot, chat_id: int, config: BotChassisConfig, sku_code
         prices=list(invoice.prices),
         provider_token=invoice.provider_token,
         is_flexible=invoice.is_flexible,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=f"Оплатить {invoice.prices[0].amount} ⭐", pay=True)],
+                [InlineKeyboardButton(text="Отмена", callback_data=CB_PAY_CANCEL)],
+            ]
+        ),
     )
     return True

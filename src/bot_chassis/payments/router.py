@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, InaccessibleMessage, Message, PreCheckoutQuery
 from loguru import logger
 
 from ..config import BotChassisConfig, resolved_origin
+from ..lifecycle import CardClosePolicy, close_card_screen
 from ..service_notify import deliver_service_message, resolve_service_destination
 from ..ports.payments import SkuVoucher, SkuVoucherConsumerPort
 from ..storage import Storage
 from ..storage.repositories.transactions import VoucherRecord
-from .service import send_sku_invoice
+from .service import CB_PAY_CANCEL, send_sku_invoice
 
 SHADOW_PAYMENT_ERROR = "Оплата временно недоступна"
 PRE_CHECKOUT_INTERNAL_ERROR = "Оплата временно недоступна"
@@ -44,6 +45,19 @@ def create_payments_router(
             await call.answer(BUY_UNAVAILABLE, show_alert=True)
             return
         await call.answer()
+
+    @router.callback_query(F.data == CB_PAY_CANCEL)
+    async def handle_pay_cancel(call: CallbackQuery) -> None:
+        message = call.message
+        await call.answer("Оплата отменена")
+        if message is None or isinstance(message, InaccessibleMessage):
+            return
+        await close_card_screen(
+            call.bot,
+            message.chat.id,
+            message.message_id,
+            policy=CardClosePolicy.DELETE,
+        )
 
     @router.pre_checkout_query()
     async def handle_pre_checkout(query: PreCheckoutQuery) -> None:

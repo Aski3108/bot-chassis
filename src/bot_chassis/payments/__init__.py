@@ -8,10 +8,11 @@ from .router import (
     SHADOW_PAYMENT_ERROR,
     create_payments_router,
 )
-from .service import InvoiceError, StarInvoice, build_star_invoice, send_sku_invoice
+from .service import CB_PAY_CANCEL, InvoiceError, StarInvoice, build_star_invoice, send_sku_invoice
 
 __all__ = [
     "BUY_UNAVAILABLE",
+    "CB_PAY_CANCEL",
     "InvoiceError",
     "MAINTENANCE_PAYMENT_ERROR",
     "PAYLOAD_MISMATCH_ERROR",
