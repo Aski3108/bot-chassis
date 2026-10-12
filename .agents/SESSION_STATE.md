@@ -24,20 +24,20 @@
 `.agents/OPS_SIDECAR_CONCEPT.md`; в `0.3.1` он не входит.
 
 Release 2.0 идёт по `.agents/UPGRADE_2_0_PLAN_AUDIT.md`. S4-A/B/C и P1
-закоммичены, B1 принят владельцем как PASS. Владелец открыл P2; следующий
-кодовый коммит переводит слоты кабинета в одну строку. Версия пакета остаётся
+закоммичены, B1 принят владельцем как PASS. P2 реализован отдельным коммитом
+`6485af6`: слоты кабинета выводятся в одну строку. Версия пакета остаётся
 `0.3.1`. Целевая `2.0.0` выставляется только в Gate R2 после PASS аудитов B1–B5.
 
 ## Проверка
 
-- `python -m pytest tests/test_gate_p.py tests/test_payments.py tests/test_factory.py tests/test_gate12_release.py -q` → **31 passed** после P1;
-- `python -m pytest tests -q` → **261 passed** после P1;
+- `python -m pytest tests/test_gate_p.py tests/test_payments.py tests/test_factory.py tests/test_gate12_release.py -q` → **34 passed**;
+- `python -m pytest tests -q` → **264 passed** после P2;
 - `python -m pytest tests/test_chassis.py -q` → **19 passed**;
 - `python -m compileall -q src tests` → чисто.
 
 ## Следующее действие
 
-1. Реализовать и проверить P2 отдельным кодовым коммитом. P3 не начинать.
+1. P2 завершён. P3 не начинать без отдельной команды владельца.
 2. Не push и не запускать live Telegram smoke без отдельной команды.
 3. Gate 13, payment-delivery queue и Ops Sidecar не смешивать с Release 2.0.
 
