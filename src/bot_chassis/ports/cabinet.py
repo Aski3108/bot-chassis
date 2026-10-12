@@ -95,8 +95,10 @@ def build_cabinet_renderer(
         del message, bot
         slots = await adapter.get_cabinet_slots(bot_id, user_id)
         lines = ["👤 <b>Аккаунт</b>"]
+        if slots:
+            lines.append("")
         for slot in slots:
-            lines.append(f"<b>{html.escape(slot.title)}</b>\n{html.escape(slot.content)}")
-        return ChassisScreen(text="\n\n".join(lines))
+            lines.append(f"• <b>{html.escape(slot.title)}:</b> {html.escape(slot.content)}")
+        return ChassisScreen(text="\n".join(lines))
 
     return _render

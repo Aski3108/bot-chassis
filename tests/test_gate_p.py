@@ -1,4 +1,4 @@
-"""Gate P1: отмена инвойса Stars."""
+"""Gate P1 и P2: отмена инвойса и однострочные слоты кабинета."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery, Chat, InaccessibleMessage, Message, Upd
 from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.payments import CB_PAY_CANCEL, create_payments_router
 from bot_chassis.payments.service import send_sku_invoice
+from bot_chassis.ports.cabinet import CabinetSlot, build_cabinet_renderer
 
 
 class TestInvoiceCancelMarkup(unittest.IsolatedAsyncioTestCase):
@@ -131,6 +132,48 @@ class TestInvoiceCancelHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(edits[0].reply_markup)
         self.assertNotIn("DeleteMessage", names)
 
+
+class _Slots:
+    def __init__(self, slots: tuple[CabinetSlot, ...]) -> None:
+        self.slots = slots
+
+    async def get_cabinet_slots(self, bot_id: str, user_id: int) -> tuple[CabinetSlot, ...]:
+        return self.slots
+
+
+class TestCabinetSlots(unittest.IsolatedAsyncioTestCase):
+    async def test_cabinet_slots_are_one_line_without_blank_gap(self) -> None:
+        renderer = build_cabinet_renderer(
+            _Slots(
+                (
+                    CabinetSlot("access", "Доступ", "VIP"),
+                    CabinetSlot("vouchers", "Талоны", "1"),
+                )
+            ),
+            "bot_a",
+        )
+        screen = await renderer(AsyncMock(), 7, AsyncMock())
+        self.assertEqual(
+            screen.text,
+            "👤 <b>Аккаунт</b>\n\n• <b>Доступ:</b> VIP\n• <b>Талоны:</b> 1",
+        )
+        self.assertNotIn("\n\n• <b>Талоны", screen.text)
+
+    async def test_cabinet_slot_html_is_escaped_once(self) -> None:
+        renderer = build_cabinet_renderer(
+            _Slots((CabinetSlot("x", 'A<B>&"C', "x<y>&z"),)),
+            "bot_a",
+        )
+        screen = await renderer(AsyncMock(), 7, AsyncMock())
+        self.assertIn("• <b>A&lt;B&gt;&amp;&quot;C:</b> x&lt;y&gt;&amp;z", screen.text)
+        self.assertNotIn("&amp;lt;", screen.text)
+        self.assertNotIn("&amp;amp;", screen.text)
+
+    async def test_empty_cabinet_has_no_trailing_blank_line(self) -> None:
+        renderer = build_cabinet_renderer(_Slots(()), "bot_a")
+        screen = await renderer(AsyncMock(), 7, AsyncMock())
+        self.assertEqual(screen.text, "👤 <b>Аккаунт</b>")
+        self.assertFalse(screen.text.endswith("\n"))
 
 async def _press_cancel(
     session: _Session,
