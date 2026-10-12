@@ -959,7 +959,10 @@ class TestGate5BTickets(unittest.IsolatedAsyncioTestCase):
         kwargs = sends[0][4]
         self.assertEqual(kwargs.get("reply_to_message_id"), 10)
         self.assertEqual(kwargs.get("message_thread_id"), 3)
-        self.assertIsNone(sends[0][3])
+        close = sends[0][3].inline_keyboard
+        self.assertEqual(len(close), 1)
+        self.assertEqual(close[0][0].text, "Закрыть")
+        self.assertEqual(close[0][0].callback_data, "core_nav:close")
 
 
 class TestComposeSupportReply(unittest.TestCase):

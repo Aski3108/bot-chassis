@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
+
+from aiogram import Bot
+from loguru import logger
 
 from .config import BotChassisConfig
 
@@ -65,3 +69,28 @@ async def deliver_service_message(bot, destination: ServiceDestination | None, t
         **thread_kwargs(destination.thread_id),
         **kwargs,
     )
+
+
+async def deliver_startup_notification(bot: Bot | None, config: BotChassisConfig) -> bool:
+    """Одно сообщение о старте: audit-чат, иначе только первый суперадмин."""
+    if bot is None:
+        return False
+    text = f"🟢 <b>Bot Chassis запущен</b>\nПроект: <b>{html.escape(config.bot_id)}</b>"
+    destination = resolve_service_destination(config, "audit")
+    try:
+        if destination is not None:
+            await bot.send_message(
+                destination.chat_id,
+                text,
+                parse_mode="HTML",
+                **thread_kwargs(destination.thread_id),
+            )
+            return True
+        if config.superadmin_ids:
+            await bot.send_message(config.superadmin_ids[0], text, parse_mode="HTML")
+            return True
+    except Exception:
+        logger.exception("Не удалось отправить уведомление о старте")
+        return False
+    logger.warning("Уведомление о старте пропущено: нет audit-чата и суперадмина")
+    return False

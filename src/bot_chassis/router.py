@@ -22,6 +22,7 @@ from typing import Optional, Callable, Awaitable, Sequence
 from aiogram import Router, types, F, Bot
 from aiogram.enums import ChatType
 from aiogram.filters import Command, Filter
+from aiogram.types import InaccessibleMessage
 from loguru import logger
 
 from .contracts import (
@@ -50,7 +51,7 @@ from .keyboards import (
     build_support_overview_keyboard,
     build_donation_keyboard,
 )
-from .lifecycle import UserScreenTracker, CardClosePolicy
+from .lifecycle import CardClosePolicy, UserScreenTracker, close_card_screen
 from .dispatcher import ActiveTaskTracker
 from .config import SkuItem
 from .followup import PendingInputStore, PendingInput, PendingInputKind
@@ -617,11 +618,14 @@ def create_button_chassis_router(
         user_id = query.from_user.id if query.from_user else 0
         screens.forget_card(user_id)
         await query.answer()
-        if query.message:
-            try:
-                await query.message.delete()
-            except Exception:
-                await query.message.edit_reply_markup(reply_markup=None)
+        message = query.message
+        if message is not None and not isinstance(message, InaccessibleMessage):
+            await close_card_screen(
+                query.bot,
+                message.chat.id,
+                message.message_id,
+                policy=CardClosePolicy.DELETE,
+            )
         if data == CB_NAV_CLOSE:
             return
         pending.clear(user_id)

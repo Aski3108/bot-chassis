@@ -23,8 +23,10 @@ from html import escape
 from typing import Optional, Sequence
 from aiogram import Bot, types
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from loguru import logger
 
+from .contracts import CB_NAV_CLOSE
 from .keyboards import build_operator_ticket_keyboard, build_user_ticket_reply_keyboard
 from .service_notify import thread_kwargs
 from .storage.sqlite_support_thread_store import (
@@ -241,10 +243,14 @@ async def send_support_history(
     messages = list_messages(ticket_id, support_chat_id=ticket.support_chat_id)
     text = support_history_text(ticket_id, messages)
     topic = thread_kwargs(ticket.message_thread_id)
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Закрыть", callback_data=CB_NAV_CLOSE)]]
+    )
     await bot.send_message(
         chat_id=ticket.support_chat_id,
         text=text,
         parse_mode="HTML",
+        reply_markup=markup,
         reply_to_message_id=header_id,
         **topic,
     )

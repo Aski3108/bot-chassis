@@ -37,6 +37,7 @@ from .ports.work_gate import DefaultWorkGateAdapter, WorkGatePort
 from .reviews import create_reviews_router
 from .router import create_button_chassis_router
 from .scheduler import BackupScheduler, ReportScheduler, register_backup_scheduler, register_report_scheduler
+from .service_notify import deliver_startup_notification
 from .storage import Storage, create_storage
 from .storage.sqlite_support_thread_store import SqliteSupportThreadStore
 from .support_bridge import SupportThreadStore
@@ -320,6 +321,11 @@ async def create_complete_chassis(
                 donation_sku_codes=tuple(item.sku_code for item in donation_items),
             ),
         )
+
+    async def _notify_startup() -> None:
+        await deliver_startup_notification(bot, config)
+
+    dp.startup.register(_notify_startup)
 
     return CompleteChassis(
         dp=dp,

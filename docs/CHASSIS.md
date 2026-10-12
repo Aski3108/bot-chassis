@@ -352,6 +352,7 @@ SKU с `issues_voucher=False` (например, донат) сохраняет�
 - Фактический Telegram bot ID берётся из токена во время выполнения. Платёж уникален по `(bot_id, provider, merchant_telegram_bot_id, payment_id)`.
 - В общей support-группе Reply доставляет только процесс origin-бота и продолжает выбранный `ticket_id`; чужой бот, чат или тема молчат. Закрытие явно снимает слот.
 - `audit_chat_id` используется для аудита, а служебные алерты выбирают audit-or-support. Все семь ботов могут быть администраторами служебной группы.
+- Старт процесса шлёт одно сообщение `🟢 Bot Chassis запущен` в audit destination (`audit_chat_id` и `audit_thread_id`). Если audit-адреса нет — только `superadmin_ids[0]`, без темы и без рассылки остальным ID. `support_chat_id` для startup не используется. Ошибки, оплаты, ops и events по-прежнему идут audit-or-support.
 - При постоянном `db_path` фабрика сама создаёт SQLite-store поддержки. `:memory:` и явно переданный JSON остаются одноразовым legacy.
 
 ---
