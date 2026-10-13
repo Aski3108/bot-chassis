@@ -131,7 +131,8 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
   полно 265, frozen 19.
 - [x] **B2.** Полный аудит P1–P3 — PASS 2026-10-13 после коррекции границы:
   P1/P2/P3 PASS, чужих production-файлов нет, frozen-файл не изменён.
-- [ ] **A0.** Новое admin/DB menu и единый root guard с throttled security audit.
+- [x] **A0.** Новое admin/DB menu и единый root guard с throttled security audit.
+  PASS; коммит `07af55f`. Узко 42, process-контур 11, полно 272, frozen 19.
 - [ ] **A6.** Точный экран статистики на корректных tenant/bot данных.
 - [ ] **B3.** Независимый аудит A0 + A6.
 - [ ] **A1.** Точное досье и Stay-in-Dossier.
