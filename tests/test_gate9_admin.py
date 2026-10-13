@@ -14,11 +14,10 @@ from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from bot_chassis.admin.lookup import FIND_PROMPT, reset_admin_lookups
 from bot_chassis.admin.broadcast import reset_broadcast_sessions
-from bot_chassis.admin.router import CB_EXPORT, CB_FIND, SUPERADMIN_ONLY, create_admin_router
+from bot_chassis.admin.router import CB_EXPORT, CB_FIND, CB_HOME, create_admin_router
 from bot_chassis.admin.screens import (
-    CB_BACK,
     CB_GO_BCAST,
-    CB_GO_EXPORT,
+    CB_GO_DB,
     CB_GO_MAINT,
     CB_GO_RESTART,
     CB_GO_STATS,
@@ -134,7 +133,7 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         await self._command(14, 1)
         home = self._named("SendMessage")[0]
         callbacks = [button.callback_data for row in home.reply_markup.inline_keyboard for button in row]
-        self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_MAINT])
+        self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_BCAST, CB_GO_DB, CB_GO_MAINT])
         self.assertIn("Планировщик: включён", home.text)
         self.assertIn("backup 04:00", home.text)
 
@@ -143,26 +142,25 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         stats = self._named("EditMessageText")[0]
         self.assertIn("Статистика", stats.text)
         self.assertIn("Бан:", stats.text)
-        nav = [button.callback_data for row in stats.reply_markup.inline_keyboard for button in row]
-        self.assertIn(CB_BACK, nav)
-        self.assertIn("adm_home", nav)
+        nav = [(button.text, button.callback_data) for row in stats.reply_markup.inline_keyboard for button in row]
+        self.assertEqual(nav, [("« Назад", CB_HOME)])
 
         self.session.requests.clear()
-        await self._callback(14, CB_BACK, 3)
+        await self._callback(14, CB_HOME, 3)
         self.assertIn("Админка", self._named("EditMessageText")[0].text)
 
         self.session.requests.clear()
-        await self._callback(14, CB_GO_EXPORT, 4)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, SUPERADMIN_ONLY)
+        await self._callback(14, CB_EXPORT, 4)
+        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, "Access Denied")
         self.assertFalse(self._named("SendDocument"))
 
         self.session.requests.clear()
         await self._callback(14, CB_GO_BCAST, 45)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, SUPERADMIN_ONLY)
+        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, "Access Denied")
 
         self.session.requests.clear()
         await self._callback(14, CB_GO_RESTART, 5)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, SUPERADMIN_ONLY)
+        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, "Access Denied")
 
     async def test_root_restart_hidden_without_port(self) -> None:
         await self._callback(100, CB_GO_RESTART, 1)
@@ -233,10 +231,14 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         edited = self._named("EditMessageText")
         self.assertTrue(any(FIND_PROMPT in (item.text or "") for item in edited))
         self.session.requests.clear()
-        await self._callback(100, CB_GO_EXPORT, 2)
+        await self._callback(100, CB_GO_DB, 2)
         export = self._named("EditMessageText")[0]
-        self.assertIn("xlsx", export.text.lower())
+        self.assertIn("Управление базой данных", export.text)
         self.assertIn(CB_EXPORT, [button.callback_data for row in export.reply_markup.inline_keyboard for button in row])
+        self.assertEqual(
+            [(button.text, button.callback_data) for row in export.reply_markup.inline_keyboard for button in row][-1],
+            ("« Назад", CB_HOME),
+        )
         self.session.requests.clear()
         await self._callback(100, CB_GO_BCAST, 3)
         bcast = self._named("EditMessageText")[0]

@@ -24,7 +24,7 @@ from bot_chassis.admin.process import (
     RESTART_STALE,
     reset_process_intents,
 )
-from bot_chassis.admin.router import SUPERADMIN_ONLY, create_admin_router
+from bot_chassis.admin.router import create_admin_router
 from bot_chassis.admin.screens import CB_GO_RESTART
 from bot_chassis.config import BotChassisConfig
 from bot_chassis.factory import create_complete_chassis
@@ -221,10 +221,12 @@ class TestGate10ProcessControl(unittest.IsolatedAsyncioTestCase):
         await self._command(14, 1)
         home = self._named("SendMessage")[0]
         callbacks = [button.callback_data for row in home.reply_markup.inline_keyboard for button in row]
-        self.assertNotIn(CB_GO_RESTART, callbacks)
+        self.assertIn(CB_GO_RESTART, callbacks)
         self.session.requests.clear()
         await self._callback(14, CB_GO_RESTART, 2)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, SUPERADMIN_ONLY)
+        answer = self._named("AnswerCallbackQuery")[0]
+        self.assertEqual(answer.text, "Access Denied")
+        self.assertTrue(answer.show_alert)
 
     async def test_root_list_has_no_system_commands_and_shows_status(self) -> None:
         await self._command(100, 1)

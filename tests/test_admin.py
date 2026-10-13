@@ -66,10 +66,10 @@ from bot_chassis.admin.router import (
     create_admin_router,
 )
 from bot_chassis.admin.screens import (
+    CB_DO_BACKUP,
     CB_DO_MAINT,
-    CB_GO_BACKUP,
     CB_GO_BCAST,
-    CB_GO_EXPORT,
+    CB_GO_DB,
     CB_GO_MAINT,
     CB_GO_RESTART,
     CB_GO_STATS,
@@ -277,13 +277,12 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Платежи Stars сегодня:", text)
         self.assertIn("Планировщик: выключен", text)
         self.assertIn("🟢 снят", text)
-        self.assertIn("/user", text)
+        self.assertNotIn("Команды:", text)
         self.assertNotIn("/export", text)
         callbacks = [button.callback_data for row in sent[0].reply_markup.inline_keyboard for button in row]
-        self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_MAINT])
+        self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_BCAST, CB_GO_DB, CB_GO_MAINT])
         self.assertNotIn(CB_EXPORT, callbacks)
-        self.assertNotIn(CB_BROADCAST, callbacks)
-        self.assertNotIn(CB_GO_BCAST, callbacks)
+        self.assertNotIn(CB_DO_BACKUP, callbacks)
         self.assertNotIn(CB_GO_RESTART, callbacks)
 
         self.session.requests.clear()
@@ -291,11 +290,12 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         root_home = [item for item in self._named("SendMessage") if item.chat_id == 100]
         self.assertTrue(root_home)
         root_cb = [button.callback_data for row in root_home[0].reply_markup.inline_keyboard for button in row]
-        self.assertIn(CB_GO_BCAST, root_cb)
-        self.assertIn(CB_GO_EXPORT, root_cb)
-        self.assertIn(CB_GO_BACKUP, root_cb)
+        self.assertEqual(root_cb, [CB_GO_STATS, CB_FIND, CB_GO_BCAST, CB_GO_DB, CB_GO_MAINT])
+        self.assertNotIn(CB_EXPORT, root_cb)
+        self.assertNotIn(CB_DO_BACKUP, root_cb)
         self.assertNotIn(CB_GO_RESTART, root_cb)
-        self.assertIn("/export", root_home[0].text)
+        self.assertNotIn("/export", root_home[0].text)
+        self.assertNotIn("Команды:", root_home[0].text)
 
         self.session.requests.clear()
         panel = Message(
@@ -342,7 +342,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             for row in staff_home.reply_markup.inline_keyboard
             for button in row
         ]
-        self.assertEqual(staff_cb, [CB_GO_STATS, CB_FIND, CB_GO_MAINT])
+        self.assertEqual(staff_cb, [CB_GO_STATS, CB_FIND, CB_GO_BCAST, CB_GO_DB, CB_GO_MAINT])
         self.assertNotIn("adm_ops:restart:adhd", staff_cb)
 
         self.session.requests.clear()
@@ -428,7 +428,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         await self._feed_callback(14, CB_EXPORT, 1, panel)
         answers = self._named("AnswerCallbackQuery")
         self.assertEqual(len(answers), 1)
-        self.assertEqual(answers[0].text, SUPERADMIN_ONLY)
+        self.assertEqual(answers[0].text, "Access Denied")
         self.assertTrue(answers[0].show_alert)
         self.assertFalse(self._named("SendDocument"))
 
@@ -436,7 +436,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         await self._feed_callback(100, CB_EXPORT, 2, panel)
         root_answer = self._named("AnswerCallbackQuery")
         self.assertEqual(len(root_answer), 1)
-        self.assertNotEqual(root_answer[0].text, SUPERADMIN_ONLY)
+        self.assertEqual(root_answer[0].text, "Формирую файл...")
         documents = self._named("SendDocument")
         self.assertEqual(len(documents), 1)
         self.assertEqual(documents[0].chat_id, 100)
@@ -447,7 +447,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.session.requests.clear()
         await self._feed_callback(14, CB_BROADCAST, 3, panel)
         answers = self._named("AnswerCallbackQuery")
-        self.assertEqual(answers[-1].text, SUPERADMIN_ONLY)
+        self.assertEqual(answers[-1].text, "Access Denied")
 
     async def test_ban_unban_and_shadowban(self) -> None:
         await self.storage.users.upsert_user("bot_a", 16, username="neo")
@@ -1005,7 +1005,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(self._named("SendMessage"))
 
             await self._feed_callback(14, "adm_bcast", 2, staff_panel)
-            self.assertEqual(self._named("AnswerCallbackQuery")[-1].text, SUPERADMIN_ONLY)
+            self.assertEqual(self._named("AnswerCallbackQuery")[-1].text, "Access Denied")
 
             await self._feed_callback(100, "adm_bcast", 21, panel)
             await self._feed_text(100, "hello <b>", 3)

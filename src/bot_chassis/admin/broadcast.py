@@ -22,7 +22,6 @@ from ..config import BotChassisConfig
 from ..storage import Storage
 from ..user_lifecycle import classify_delivery_error, record_delivery_outcome
 from .audit import send_admin_audit
-from .filters import SUPERADMIN_ONLY
 
 CB_BROADCAST = "adm_bcast"
 CB_BROADCAST_GO = "adm_bcast:go"
@@ -64,15 +63,12 @@ def register_broadcast(
     *,
     root: Filter,
     raise_home=None,
+    require_root_call,
 ) -> None:
     @router.callback_query(F.data == CB_BROADCAST, staff)
     async def start_broadcast(call: CallbackQuery) -> None:
-        actor = call.from_user
-        if actor is None or await _is_banned(storage, bot_id, actor.id):
-            await call.answer()
-            return
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+        actor = await require_root_call(call, "Рассылка")
+        if actor is None:
             return
         key = (bot_id, actor.id)
         current = _BROADCAST_SESSIONS.get(key)
@@ -118,12 +114,8 @@ def register_broadcast(
 
     @router.callback_query(F.data == CB_BROADCAST_CANCEL, staff)
     async def cancel_broadcast(call: CallbackQuery) -> None:
-        actor = call.from_user
-        if actor is None or await _is_banned(storage, bot_id, actor.id):
-            await call.answer()
-            return
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+        actor = await require_root_call(call, "Рассылка")
+        if actor is None:
             return
         _BROADCAST_SESSIONS.pop((bot_id, actor.id), None)
         await _strip_markup(call)
@@ -137,12 +129,8 @@ def register_broadcast(
 
     @router.callback_query(F.data == CB_BROADCAST_GO, staff)
     async def launch_broadcast(call: CallbackQuery) -> None:
-        actor = call.from_user
-        if actor is None or await _is_banned(storage, bot_id, actor.id):
-            await call.answer()
-            return
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
+        actor = await require_root_call(call, "Рассылка")
+        if actor is None:
             return
         key = (bot_id, actor.id)
         session = _BROADCAST_SESSIONS.get(key)
@@ -162,12 +150,8 @@ def register_broadcast(
 
     @router.callback_query(F.data == CB_BROADCAST_STOP, staff)
     async def stop_broadcast(call: CallbackQuery) -> None:
-        actor = call.from_user
+        actor = await require_root_call(call, "Рассылка")
         if actor is None:
-            await call.answer()
-            return
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
             return
         session = _BROADCAST_SESSIONS.get((bot_id, actor.id))
         if session is None or session.phase != "running":

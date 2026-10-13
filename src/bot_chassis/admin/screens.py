@@ -18,25 +18,17 @@ CB_GO_STATS = "adm_go:stats"
 CB_GO_MAINT = "adm_go:maint"
 CB_DO_MAINT = "adm_do:maint"
 CB_GO_BCAST = "adm_go:bcast"
-CB_GO_EXPORT = "adm_go:export"
-CB_GO_BACKUP = "adm_go:backup"
+CB_GO_DB = "adm_go:db_menu"
 CB_DO_BACKUP = "adm_do:backup"
 CB_GO_RESTART = "adm_go:restart"
 CB_BACK = "adm_back"
-
-ROOT_ONLY_CALLBACKS = frozenset(
-    {
-        CB_GO_BCAST,
-        CB_GO_EXPORT,
-        CB_GO_BACKUP,
-        CB_GO_RESTART,
-        "adm_export",
-        CB_DO_BACKUP,
-        "adm_bcast",
-        "adm_bcast:go",
-        "adm_bcast:cancel",
-        "adm_bcast:stop",
-    }
+DB_MENU_TEXT = (
+    "💾 <b>Управление базой данных</b>\n"
+    "\n"
+    "Выберите действие:\n"
+    "• Выгрузка пользователей — файл Excel (.xlsx) с гиперссылками на профили.\n"
+    "• Бэкап базы данных (.db) — бинарный файл SQLite базы данных проекта.\n"
+    "• Список пользователей — просмотр всей базы прямо в Telegram."
 )
 
 
@@ -154,6 +146,12 @@ def nav_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def back_only_keyboard(*, callback_data: str = "adm_home") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="« Назад", callback_data=callback_data)]]
+    )
+
+
 def home_keyboard(
     *,
     is_root: bool,
@@ -162,19 +160,14 @@ def home_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📊 Статистика", callback_data=CB_GO_STATS)],
-        [InlineKeyboardButton(text="Найти пользователя", callback_data="adm_find")],
-        [InlineKeyboardButton(text="Рубильник", callback_data=CB_GO_MAINT)],
+        [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="adm_find")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data=CB_GO_BCAST)],
+        [InlineKeyboardButton(text="💾 База данных", callback_data=CB_GO_DB)],
+        [InlineKeyboardButton(text="⚙️ Рубильник", callback_data=CB_GO_MAINT)],
     ]
+    if show_restart:
+        rows.append([InlineKeyboardButton(text="🔄 Рестарт бота", callback_data=CB_GO_RESTART)])
     if is_root:
-        rows.extend(
-            [
-                [InlineKeyboardButton(text="📢 Рассылка", callback_data=CB_GO_BCAST)],
-                [InlineKeyboardButton(text="📥 Выгрузка базы (Excel)", callback_data=CB_GO_EXPORT)],
-                [InlineKeyboardButton(text="💾 Бэкап базы данных (.db)", callback_data=CB_GO_BACKUP)],
-            ]
-        )
-        if show_restart:
-            rows.append([InlineKeyboardButton(text="🔄 Рестарт", callback_data=CB_GO_RESTART)])
         for row in extra_rows or ():
             buttons = [
                 InlineKeyboardButton(text=text, callback_data=callback_data)
@@ -185,8 +178,11 @@ def home_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def command_cheatsheet(*, is_root: bool) -> str:
-    lines = ["/user", "/ban", "/unban", "/shadowban", "/maintenance", "/refund"]
-    if is_root:
-        lines.extend(["/grant", "/revoke", "/gift", "/gift_revoke", "/export", "/backup"])
-    return "Команды: " + " · ".join(lines)
+def db_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Выгрузка пользователей (.xlsx)", callback_data="adm_export")],
+            [InlineKeyboardButton(text="💾 Бэкап базы данных (.db)", callback_data=CB_DO_BACKUP)],
+            *back_only_keyboard().inline_keyboard,
+        ]
+    )

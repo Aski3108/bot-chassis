@@ -6,6 +6,7 @@ import html
 import inspect
 import os
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Sequence
@@ -46,13 +47,14 @@ from .screens import (
     CB_BACK,
     CB_DO_BACKUP,
     CB_DO_MAINT,
-    CB_GO_BACKUP,
     CB_GO_BCAST,
-    CB_GO_EXPORT,
+    CB_GO_DB,
     CB_GO_MAINT,
     CB_GO_STATS,
+    DB_MENU_TEXT,
     AdminScreenTracker,
-    command_cheatsheet,
+    back_only_keyboard,
+    db_menu_keyboard,
     home_keyboard,
     nav_keyboard,
 )
@@ -89,6 +91,20 @@ REFUND_ALREADY = "Платёж уже возвращён"
 REFUND_NO_CHARGE = "У платежа нет идентификатора Stars"
 REFUND_REJECTED = "Telegram не подтвердил возврат"
 REFUND_OTHER_BOT = "Платёж принял другой бот; откройте /refund в нём"
+SECURITY_ALERT_TTL_SECONDS = 60.0
+_SECURITY_ALERT_THROTTLE: dict[tuple[str, int, str], float] = {}
+
+
+def _drop_expired_security_alerts(now: float) -> None:
+    expired = [
+        key
+        for key, seen_at in _SECURITY_ALERT_THROTTLE.items()
+        if now - seen_at >= SECURITY_ALERT_TTL_SECONDS
+    ]
+    for key in expired:
+        del _SECURITY_ALERT_THROTTLE[key]
+
+
 MAINTENANCE_USAGE = (
     "Формат: /maintenance [on|off] [причина] или /maintenance bot_id on|off [причина]. "
     "Локальная пауза останавливает опросники этого бота, но не отключает Stars."
@@ -544,14 +560,31 @@ def create_admin_router(
             return None
         return user
 
-    async def _require_root_call(call: CallbackQuery):
+    async def _require_root_call(call: CallbackQuery, action_label: str):
         user = await _require_staff_call(call)
         if user is None:
             return None
-        if not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
-            return None
-        return user
+        if await root(call):
+            return user
+        now = time.monotonic()
+        _drop_expired_security_alerts(now)
+        key = (bot_id, user.id, call.data or action_label)
+        reserve_audit = key not in _SECURITY_ALERT_THROTTLE
+        if reserve_audit:
+            _SECURITY_ALERT_THROTTLE[key] = now
+        await call.answer("Access Denied", show_alert=True)
+        if reserve_audit:
+            identity = f"@{html.escape(user.username)}" if user.username else "без username"
+            label = html.escape(action_label)
+            text = (
+                "🚨 <b>Попытка несанкционированного доступа</b>: "
+                f"админ {identity} (ID: <code>{user.id}</code>) нажал <b>[{label}]</b>"
+            )
+            try:
+                await send_admin_audit(call.bot, config, text, is_html=True)
+            except Exception:
+                logger.exception("Не удалось отправить security alert")
+        return None
 
     @router.callback_query(F.data.in_({CB_HOME, CB_BACK}), staff)
     async def handle_home_callback(call: CallbackQuery) -> None:
@@ -574,7 +607,13 @@ def create_admin_router(
             reporting_policy=reporting_policy,
         )
         text = _stats_text(dash)
-        await panels.edit_or_send(call, bot_id, user.id, text, nav_keyboard())
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            user.id,
+            text,
+            back_only_keyboard(callback_data=CB_HOME),
+        )
         await call.answer()
 
     @router.callback_query(F.data.in_({CB_GO_MAINT, CB_MAINT}), staff)
@@ -587,7 +626,12 @@ def create_admin_router(
         text = "🔴 Рубильник опущен" if current else "🟢 Рубильник снят"
         if current and reason:
             text += "\n" + html.escape(reason)
-        markup = nav_keyboard([InlineKeyboardButton(text=label, callback_data=CB_DO_MAINT)])
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=label, callback_data=CB_DO_MAINT)],
+                *back_only_keyboard(callback_data=CB_HOME).inline_keyboard,
+            ]
+        )
         await panels.edit_or_send(call, bot_id, user.id, text, markup)
         await call.answer()
 
@@ -616,7 +660,7 @@ def create_admin_router(
 
     @router.callback_query(F.data == CB_GO_BCAST, staff)
     async def handle_broadcast_screen(call: CallbackQuery) -> None:
-        user = await _require_root_call(call)
+        user = await _require_root_call(call, "Рассылка")
         if user is None:
             return
         markup = nav_keyboard(
@@ -631,57 +675,29 @@ def create_admin_router(
         )
         await call.answer()
 
-    @router.callback_query(F.data == CB_GO_EXPORT, staff)
-    async def handle_export_screen(call: CallbackQuery) -> None:
-        user = await _require_root_call(call)
+    @router.callback_query(F.data == CB_GO_DB, staff)
+    async def handle_db_menu(call: CallbackQuery) -> None:
+        user = await _require_root_call(call, "База данных")
         if user is None:
             return
-        markup = nav_keyboard(
-            [InlineKeyboardButton(text="📥 Скачать Excel", callback_data=CB_EXPORT)]
-        )
-        await panels.edit_or_send(
-            call,
-            bot_id,
-            user.id,
-            "Выгрузка SQLite в .xlsx. Команда /export по-прежнему отдаёт CSV/ZIP.",
-            markup,
-        )
+        await panels.edit_or_send(call, bot_id, user.id, DB_MENU_TEXT, db_menu_keyboard())
         await call.answer()
 
     @router.callback_query(F.data == CB_EXPORT, staff)
     async def handle_export(call: CallbackQuery) -> None:
-        user = await _require_root_call(call)
+        user = await _require_root_call(call, "Выгрузка пользователей")
         if user is None:
             return
-        await call.answer("Формирую выгрузку...")
+        await call.answer("Формирую файл...")
         await _send_xlsx_export(call.bot, storage, config, bot_id, user.id)
-        await _raise_home(call.bot, user.id, True, int(call.bot.id))
-
-    @router.callback_query(F.data == CB_GO_BACKUP, staff)
-    async def handle_backup_screen(call: CallbackQuery) -> None:
-        user = await _require_root_call(call)
-        if user is None:
-            return
-        markup = nav_keyboard(
-            [InlineKeyboardButton(text="💾 Скачать .db", callback_data=CB_DO_BACKUP)]
-        )
-        await panels.edit_or_send(
-            call,
-            bot_id,
-            user.id,
-            "Ручной снимок SQLite для восстановления. Ночной ZIP в каталог не отправляется в Telegram.",
-            markup,
-        )
-        await call.answer()
 
     @router.callback_query(F.data == CB_DO_BACKUP, staff)
     async def handle_backup_button(call: CallbackQuery) -> None:
-        user = await _require_root_call(call)
+        user = await _require_root_call(call, "Бэкап базы данных")
         if user is None:
             return
         await call.answer("Готовлю снимок...")
         await _send_backup(call.bot, storage, user.id, backup_policy=backup_policy)
-        await _raise_home(call.bot, user.id, True, int(call.bot.id))
 
     register_process_control(
         router,
@@ -716,7 +732,7 @@ def create_admin_router(
             bot_id,
             actor.id,
             FIND_PROMPT + "\n/cancel — отмена.",
-            nav_keyboard(),
+            back_only_keyboard(callback_data=CB_HOME),
         )
         await call.answer()
 
@@ -761,17 +777,9 @@ def create_admin_router(
         staff,
         root=root,
         raise_home=_raise_home,
+        require_root_call=_require_root_call,
     )
     return router
-
-
-def _home_keyboard(
-    *,
-    is_root: bool,
-    extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
-    show_restart: bool = False,
-) -> InlineKeyboardMarkup:
-    return home_keyboard(is_root=is_root, extra_rows=extra_rows, show_restart=show_restart)
 
 
 async def _home(
@@ -805,7 +813,6 @@ async def _home(
     ]
     if dash["maintenance_on"] and dash["reason"]:
         lines.append(html.escape(str(dash["reason"])))
-    lines.append(command_cheatsheet(is_root=is_root))
     extra_rows = (
         extra_actions.home_rows()
         if extra_actions is not None and is_root

@@ -71,7 +71,7 @@ def register_process_control(
     _ = root
     @router.callback_query(F.data == CB_GO_RESTART, staff)
     async def handle_restart_screen(call: CallbackQuery) -> None:
-        user = await require_root_call(call)
+        user = await require_root_call(call, "Рестарт бота")
         if user is None:
             return
         if process_control is None:
@@ -85,7 +85,7 @@ def register_process_control(
 
     @router.callback_query(F.data == CB_RST_ALL, staff)
     async def ask_restart_all(call: CallbackQuery) -> None:
-        user = await require_root_call(call)
+        user = await require_root_call(call, "Рестарт бота")
         if user is None:
             return
         targets = order_targets(await process_control.list_targets())
@@ -106,7 +106,7 @@ def register_process_control(
 
     @router.callback_query(F.data.startswith(CB_RST_PREFIX_ONE), staff)
     async def ask_restart_one(call: CallbackQuery) -> None:
-        user = await require_root_call(call)
+        user = await require_root_call(call, "Рестарт бота")
         if user is None:
             return
         target_id = (call.data or "").removeprefix(CB_RST_PREFIX_ONE)
@@ -126,7 +126,7 @@ def register_process_control(
 
     @router.callback_query(F.data == CB_RST_NO, staff)
     async def cancel_restart(call: CallbackQuery) -> None:
-        user = await require_root_call(call)
+        user = await require_root_call(call, "Рестарт бота")
         if user is None:
             return
         await _show_list(call, bot_id, user.id, process_control, panels)
@@ -134,7 +134,7 @@ def register_process_control(
 
     @router.callback_query(F.data.startswith(CB_RST_PREFIX_OK), staff)
     async def confirm_restart(call: CallbackQuery) -> None:
-        user = await require_root_call(call)
+        user = await require_root_call(call, "Рестарт бота")
         if user is None:
             return
         token = (call.data or "").removeprefix(CB_RST_PREFIX_OK)
