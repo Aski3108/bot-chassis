@@ -191,7 +191,7 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         self.session.requests.clear()
         await self._text(14, "@neo", 4)
         dossier = self._texts(14)
-        self.assertTrue(any("ID: 16" in text for text in dossier))
+        self.assertTrue(any("ID: <code>16</code>" in text for text in dossier))
         self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
 

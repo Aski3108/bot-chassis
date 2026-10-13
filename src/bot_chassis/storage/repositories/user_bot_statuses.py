@@ -18,6 +18,7 @@ class UserBotStatus:
     origin_bot_id: str
     telegram_bot_id: int
     status: str
+    last_seen_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,21 +167,32 @@ class UserBotStatusRepository:
         def _op(conn) -> list[UserBotStatus]:
             rows = conn.execute(
                 """
-                SELECT origin_bot_id, telegram_bot_id, status
+                SELECT origin_bot_id, telegram_bot_id, status, last_seen_at
                 FROM user_bot_statuses
                 WHERE bot_id = ? AND user_id = ?
                 ORDER BY telegram_bot_id ASC
                 """,
                 (bot_id, user_id),
             ).fetchall()
-            return [
-                UserBotStatus(
-                    origin_bot_id=row["origin_bot_id"],
-                    telegram_bot_id=int(row["telegram_bot_id"]),
-                    status=row["status"],
-                )
-                for row in rows
-            ]
+            return [_status_row(row) for row in rows]
+
+        return await self._engine.run(_op)
+
+    async def get_for_user(
+        self, bot_id: str, user_id: int, telegram_bot_id: int
+    ) -> UserBotStatus | None:
+        def _op(conn) -> UserBotStatus | None:
+            row = conn.execute(
+                """
+                SELECT origin_bot_id, telegram_bot_id, status, last_seen_at
+                FROM user_bot_statuses
+                WHERE bot_id = ? AND user_id = ? AND telegram_bot_id = ?
+                """,
+                (bot_id, user_id, int(telegram_bot_id)),
+            ).fetchone()
+            if row is None:
+                return None
+            return _status_row(row)
 
         return await self._engine.run(_op)
 
@@ -233,6 +245,15 @@ class UserBotStatusRepository:
             )
 
         return await self._engine.run(_op)
+
+
+def _status_row(row) -> UserBotStatus:
+    return UserBotStatus(
+        origin_bot_id=row["origin_bot_id"],
+        telegram_bot_id=int(row["telegram_bot_id"]),
+        status=row["status"],
+        last_seen_at=row["last_seen_at"],
+    )
 
 
 def _upsert_status(

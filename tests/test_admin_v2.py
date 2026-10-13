@@ -37,6 +37,7 @@ from bot_chassis.admin.router import (
     CB_HOME,
     SECURITY_ALERT_TTL_SECONDS,
     _SECURITY_ALERT_THROTTLE,
+    _dossier,
     create_admin_router,
 )
 from bot_chassis.admin.screens import (
@@ -687,6 +688,327 @@ class TestAdminV2A6(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(screen.text.endswith("\n"))
         self.assertEqual(_rows(screen.reply_markup), [("« Назад", CB_HOME)])
+
+
+_MINIMAL_DOSSIER = """<b>Досье пользователя</b>
+
+Имя: <b>Александр</b> @alexander (ID: <code>123456789</code>)
+
+Статус: 🟢 Активен
+
+Первый визит: 2026-10-05 14:20 UTC
+Последняя активность: 2026-10-10 12:45 UTC"""
+
+_FULL_DOSSIER = """<b>Досье пользователя</b>
+
+Имя: <b>Planferno</b> @Planferno (ID: <code>554750808</code>)
+
+Статус: 🔴 Заблокирован · 👤🕶 Теневой бан
+Роль: Суперадминистратор
+
+Первый визит: 2026-10-08 02:59 UTC
+Последняя активность: 2026-10-10 15:10 UTC
+
+Подписка: Gift (до 2026-11-08)
+Токены: 5 шт.
+Рефералы: пригласил 3 чел."""
+
+_STOPPED_DOSSIER = """<b>Досье пользователя</b>
+
+Имя: <b>Иван</b> @ivan_user (ID: <code>987654321</code>)
+
+Статус: 🛑 Бот остановлен пользователем
+
+Первый визит: 2026-09-20 10:00 UTC
+Последняя активность: 2026-10-01 18:30 UTC"""
+
+
+class TestAdminV2A1(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=os.path.join(self._tmp.name, "admin.db"),
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+        )
+        self.storage = await create_storage(self.config)
+        await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def _user(self, user_id: int, *, username=None, first_name=None, last_name=None, created_at: str) -> None:
+        await self.storage.users.upsert_user(
+            "bot_a",
+            user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+        def _op(conn) -> None:
+            conn.execute(
+                "UPDATE users SET created_at = ? WHERE bot_id = ? AND user_id = ?",
+                (created_at, "bot_a", user_id),
+            )
+
+        await self.storage.engine.run(_op)
+
+    async def _seen(self, user_id: int, telegram_bot_id: int, status: str, seen_at: str) -> None:
+        def _op(conn) -> None:
+            conn.execute(
+                """
+                INSERT INTO user_bot_statuses (
+                    bot_id, user_id, origin_bot_id, telegram_bot_id, status,
+                    first_seen_at, last_seen_at, status_changed_at
+                ) VALUES (?, ?, 'bot_a', ?, ?, ?, ?, ?)
+                """,
+                ("bot_a", user_id, telegram_bot_id, status, seen_at, seen_at, seen_at),
+            )
+
+        await self.storage.engine.run(_op)
+
+    async def _flags(self, user_id: int, *, banned: bool = False, shadow: bool = False) -> None:
+        def _op(conn) -> None:
+            conn.execute(
+                """
+                UPDATE users SET is_banned = ?, is_shadow_banned = ?
+                WHERE bot_id = ? AND user_id = ?
+                """,
+                (1 if banned else 0, 1 if shadow else 0, "bot_a", user_id),
+            )
+
+        await self.storage.engine.run(_op)
+
+    async def _card(self, user_id: int, telegram_bot_id: int = 123456, *, is_root: bool = False):
+        return await _dossier(
+            self.storage,
+            "bot_a",
+            user_id,
+            telegram_bot_id=telegram_bot_id,
+            is_root=is_root,
+        )
+
+    async def test_dossier_exact_minimal_html(self) -> None:
+        await self._user(
+            123456789,
+            username="alexander",
+            first_name="Александр",
+            created_at="2026-10-05 14:20:45",
+        )
+        await self.storage.users.set_language_code("bot_a", 123456789, "en")
+        await self.storage.users.set_traffic_source("bot_a", 123456789, "ads")
+        await self._seen(123456789, 123456, "active", "2026-10-10 12:45:01")
+        text, markup = await self._card(123456789)
+        self.assertEqual(text, _MINIMAL_DOSSIER)
+        self.assertFalse(text.endswith("\n"))
+        self.assertNotIn("Язык", text)
+        self.assertNotIn("Источник", text)
+        self.assertNotIn("Роль:", text)
+        self.assertNotIn("Подписка:", text)
+        self.assertNotIn("Токены:", text)
+        self.assertNotIn("Рефералы:", text)
+        self.assertEqual(
+            _rows(markup),
+            [
+                ("🔴 Забанить", "adm_usr:ban:123456789"),
+                ("👻 Теневой бан: ВКЛ", "adm_usr:shban:123456789"),
+                ("« Назад", "adm_back"),
+                ("В главное меню", "adm_home"),
+            ],
+        )
+
+    async def test_dossier_exact_full_html(self) -> None:
+        user_id = 554750808
+        await self._user(user_id, username="Planferno", first_name="Planferno", created_at="2026-10-08 02:59:59")
+        await self.storage.roles.grant_role("bot_a", user_id, "admin", granted_by=100)
+        await self.storage.roles.grant_role("bot_a", user_id, "superadmin", granted_by=100)
+        await self._flags(user_id, banned=True, shadow=True)
+        await self._seen(user_id, 123456, "stopped", "2026-10-10 15:10:33")
+
+        def _gift(conn) -> None:
+            conn.execute(
+                """
+                INSERT INTO subscriptions (
+                    bot_id, user_id, plan_code, is_lifetime, expires_at, granted_by, status
+                ) VALUES ('bot_a', ?, 'default', 0, '2026-11-08 23:30:00', 100, 'active')
+                """,
+                (user_id,),
+            )
+
+        await self.storage.engine.run(_gift)
+        for index in range(5):
+            charge = f"chg-full-{index}"
+            await self.storage.transactions.record_successful_payment(
+                bot_id="bot_a",
+                user_id=user_id,
+                sku_code="vip",
+                amount=1,
+                telegram_payment_charge_id=charge,
+                payment_id=charge,
+            )
+        for referee in (801, 802, 803):
+            ok, err = await self.storage.referrals.record_referral("bot_a", user_id, referee)
+            self.assertTrue(ok, err)
+        text, markup = await self._card(user_id, is_root=True)
+        self.assertEqual(text, _FULL_DOSSIER)
+        self.assertNotIn("Администратор\n", text)
+        self.assertNotIn("adm_usr:role_adm:", "".join(item[1] for item in _rows(markup)))
+        self.assertIn(("🎁 +30 дней VIP", "adm_usr:gift30:554750808"), _rows(markup))
+        self.assertIn(("🎟 +1 талон", "adm_usr:addvouch:554750808"), _rows(markup))
+
+    async def test_dossier_formats_utc_without_seconds_or_local_shift(self) -> None:
+        await self._user(610, username="u<i>", first_name="A<b>", created_at="2026-10-05 21:30:45")
+        await self._seen(610, 123456, "active", "2026-10-05T21:30:45")
+        text, _markup = await self._card(610)
+        self.assertIn("Первый визит: 2026-10-05 21:30 UTC", text)
+        self.assertIn("Последняя активность: 2026-10-05 21:30 UTC", text)
+        self.assertNotIn("2026-10-06", text)
+        self.assertNotIn("21:30:45", text)
+        self.assertIn("Имя: <b>A&lt;b&gt;</b> @u&lt;i&gt; (ID: <code>610</code>)", text)
+        self.assertNotIn("A<b>", text)
+        self.assertEqual(text.count("&lt;b&gt;"), 1)
+
+        await self._user(611, username="only_name", created_at="2026-10-01 00:00:00")
+        username_only, _markup = await self._card(611)
+        self.assertIn("Username: @only_name (ID: <code>611</code>)", username_only)
+        self.assertNotIn("Последняя активность", username_only)
+        self.assertNotIn("Имя:", username_only)
+
+        await self._user(612, created_at="legacy <b> UTC")
+        with patch("bot_chassis.admin.router.logger.warning") as warned:
+            raw, _markup = await self._card(612)
+        self.assertIn("Первый визит: legacy &lt;b&gt; UTC", raw)
+        self.assertNotIn("UTC UTC", raw)
+        self.assertNotIn("legacy <b>", raw)
+        warned.assert_called_once()
+
+        await self._user(613, created_at="2026-10-02 08:00:00")
+        bare, _markup = await self._card(613)
+        self.assertIn("ID: <code>613</code>", bare)
+        self.assertNotIn("Имя:", bare)
+        self.assertNotIn("Username:", bare)
+
+    async def test_dossier_status_precedence(self) -> None:
+        await self._user(501, first_name="Both", created_at="2026-10-01 00:00:00")
+        await self._flags(501, banned=True, shadow=True)
+        await self._seen(501, 123456, "deleted", "2026-10-02 00:00:00")
+        both, _markup = await self._card(501)
+        self.assertIn("Статус: 🔴 Заблокирован · 👤🕶 Теневой бан", both)
+        self.assertNotIn("Аккаунт удалён", both)
+
+        await self._user(502, first_name="Ban", created_at="2026-10-01 00:00:00")
+        await self._flags(502, banned=True)
+        await self._seen(502, 123456, "stopped", "2026-10-02 00:00:00")
+        banned, _markup = await self._card(502)
+        self.assertIn("Статус: 🔴 Заблокирован", banned)
+        self.assertNotIn("Теневой бан", banned)
+        self.assertNotIn("остановлен", banned)
+
+        await self._user(503, first_name="Shade", created_at="2026-10-01 00:00:00")
+        await self._flags(503, shadow=True)
+        await self._seen(503, 123456, "deleted", "2026-10-02 00:00:00")
+        shadow, _markup = await self._card(503)
+        self.assertIn("Статус: 👤🕶 Теневой бан", shadow)
+        self.assertNotIn("Заблокирован", shadow)
+        self.assertNotIn("Аккаунт удалён", shadow)
+
+        await self._user(504, first_name="Gone", created_at="2026-10-01 00:00:00")
+        await self._seen(504, 123456, "deleted", "2026-10-02 00:00:00")
+        deleted, _markup = await self._card(504)
+        self.assertIn("Статус: ⚠️ Аккаунт удалён в Telegram", deleted)
+
+        await self._user(505, first_name="Stop", created_at="2026-10-01 00:00:00")
+        await self._seen(505, 123456, "stopped", "2026-10-02 00:00:00")
+        stopped, _markup = await self._card(505)
+        self.assertIn("Статус: 🛑 Бот остановлен пользователем", stopped)
+
+        await self._user(506, first_name="Live", created_at="2026-10-01 00:00:00")
+        live, _markup = await self._card(506)
+        self.assertIn("Статус: 🟢 Активен", live)
+        self.assertNotIn("Последняя активность", live)
+
+    async def test_dossier_uses_current_telegram_bot_lifecycle(self) -> None:
+        await self._user(987654321, username="ivan_user", first_name="Иван", created_at="2026-09-20 10:00:59")
+        await self._seen(987654321, 123456, "stopped", "2026-10-01 18:30:01")
+        await self._seen(987654321, 999, "deleted", "2026-10-11 09:00:00")
+        current, _markup = await self._card(987654321, 123456)
+        neighbor, _markup = await self._card(987654321, 999)
+        self.assertEqual(current, _STOPPED_DOSSIER)
+        self.assertIn("Статус: ⚠️ Аккаунт удалён в Telegram", neighbor)
+        self.assertNotIn("остановлен", neighbor)
+        self.assertIn("Последняя активность: 2026-10-11 09:00 UTC", neighbor)
+        self.assertNotIn("BPD", current)
+        self.assertNotIn("Санкции сети", current)
+
+    async def test_dossier_action_stays_in_place(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 16, username="neo", first_name="Neo")
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        dispatcher = Dispatcher()
+
+        def extra_rows(user_id: int):
+            return [[("Grant hours", f"adm_ops:grant_hours:{user_id}")]]
+
+        async def extra_lines(user_id: int):
+            return [f"Extra hours: {user_id}"]
+
+        dispatcher.include_router(
+            create_admin_router(
+                "bot_a",
+                self.storage,
+                self.config,
+                extra_user_dossier_lines=extra_lines,
+                extra_user_dossier_rows=extra_rows,
+            )
+        )
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=100, type="private"),
+            from_user=_user(100),
+            text="dossier",
+        )
+
+        async def click(data: str, update_id: int) -> None:
+            await dispatcher.feed_update(
+                bot,
+                Update(
+                    update_id=update_id,
+                    callback_query=CallbackQuery(
+                        id=str(update_id),
+                        from_user=_user(100),
+                        chat_instance="x",
+                        data=data,
+                        message=panel,
+                    ),
+                ),
+            )
+
+        await click("adm_usr:ban:16", 1)
+        await click("adm_usr:ban:16", 2)
+        edits = [item for item in session.requests if item.__class__.__name__ == "EditMessageText"]
+        self.assertEqual(len(edits), 2)
+        self.assertIn("Статус: 🔴 Заблокирован", edits[0].text)
+        self.assertIn("Статус: 🟢 Активен", edits[1].text)
+        self.assertTrue(edits[0].text.endswith("Extra hours: 16"))
+        self.assertIsNotNone(edits[0].reply_markup)
+        self.assertIsNotNone(edits[1].reply_markup)
+        self.assertEqual(_rows(edits[1].reply_markup)[-3], ("Grant hours", "adm_ops:grant_hours:16"))
+        homes = [
+            item
+            for item in session.requests
+            if item.__class__.__name__ == "SendMessage" and item.chat_id == 100 and "Админка" in (item.text or "")
+        ]
+        self.assertFalse(homes)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+
+        session.requests.clear()
+        await click("adm_usr:role_adm:16", 3)
+        self.assertFalse(await self.storage.roles.has_any_role("bot_a", 16, ("admin",)))
+        self.assertFalse([item for item in session.requests if item.__class__.__name__ == "EditMessageText"])
+        await bot.session.close()
 
 
 if __name__ == "__main__":

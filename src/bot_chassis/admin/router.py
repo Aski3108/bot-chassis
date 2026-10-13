@@ -26,7 +26,6 @@ from loguru import logger
 
 from ..config import BotChassisConfig, resolved_origin
 from ..policies import BACKUP_JOB_KEY, UTC_PLUS_5, BackupPolicy, ReportingPolicy
-from ..user_lifecycle import STATUS_LABELS
 from ..ports.admin_extra import ExtraAdminActions
 from ..storage.backup import write_manual_snapshot
 from ..storage import Storage
@@ -361,6 +360,7 @@ def create_admin_router(
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
             bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(message.bot.id),
             is_root=await _actor_is_root(actor.id),
         )
         if card is None:
@@ -368,6 +368,25 @@ def create_admin_router(
             return
         text, markup = card
         await panels.send_panel(message.bot, bot_id, actor.id, text, markup)
+
+    async def _show_dossier_call(call, actor_id: int, target_id: int, *, keyboard_mode: str = "legacy") -> bool:
+        if keyboard_mode != "legacy":
+            keyboard_mode = "legacy"
+        card = await _dossier(
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(call.bot.id),
+            is_root=await _actor_is_root(actor_id),
+        )
+        if card is None:
+            return False
+        text, markup = card
+        await panels.edit_or_send(call, bot_id, actor_id, text, markup)
+        return True
 
     @router.callback_query(F.data.startswith("adm_usr:"), staff)
     async def handle_user_action(call: CallbackQuery) -> None:
@@ -380,7 +399,7 @@ def create_admin_router(
             await call.answer()
             return
         action, target_id = parsed
-        if action in {"gift30", "addvouch", "role_adm"} and not await root(call):
+        if action in {"gift30", "addvouch"} and not await root(call):
             await call.answer(SUPERADMIN_ONLY, show_alert=True)
             return
         if await storage.users.get_user(bot_id, target_id) is None:
@@ -390,20 +409,11 @@ def create_admin_router(
         if error:
             await call.answer(error, show_alert=True)
             return
-        is_root_actor = await _actor_is_root(user.id)
-        card = await _dossier(
-            storage,
-            bot_id,
-            target_id,
-            extra_user_dossier_lines=extra_user_dossier_lines,
-            extra_user_dossier_rows=extra_user_dossier_rows,
-            bot_display_name_provider=bot_display_name_provider,
-            is_root=is_root_actor,
-        )
-        report = card[0] if card is not None else "Готово"
-        await panels.freeze_as_report(call, bot_id, user.id, report)
+        shown = await _show_dossier_call(call, user.id, target_id, keyboard_mode="legacy")
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
         await call.answer()
-        await _raise_home(call.bot, user.id, is_root_actor, int(call.bot.id))
 
     @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_export_command(message: Message) -> None:
@@ -762,6 +772,7 @@ def create_admin_router(
             extra_user_dossier_lines=extra_user_dossier_lines,
             extra_user_dossier_rows=extra_user_dossier_rows,
             bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(message.bot.id),
             is_root=await _actor_is_root(actor.id),
         )
         if card is None:
@@ -884,7 +895,7 @@ def _revoke_error(code: str | None) -> str:
 
 def _parse_user_callback(data: str) -> tuple[str, int] | None:
     action, _, target = data.removeprefix("adm_usr:").partition(":")
-    if action not in {"ban", "shban", "gift30", "addvouch", "role_adm"} or not target.isdigit():
+    if action not in {"ban", "shban", "gift30", "addvouch"} or not target.isdigit():
         return None
     return action, int(target)
 
@@ -902,6 +913,18 @@ async def _invoke_user_port(port, user_id: int):
     return result
 
 
+def _format_utc_minute(value: str | None) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value)
+    try:
+        moment = parse_utc(raw)
+    except (ValueError, TypeError):
+        logger.warning("Неразобранная дата досье: {}", raw)
+        return raw
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 async def _dossier(
     storage: Storage,
     bot_id: str,
@@ -910,84 +933,121 @@ async def _dossier(
     extra_user_dossier_rows=None,
     bot_display_name_provider=None,
     *,
+    telegram_bot_id: int,
     is_root: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
+    del bot_display_name_provider
     user = await storage.users.get_user(bot_id, user_id)
     if user is None:
         return None
     roles = await _role_names(storage, bot_id, user_id)
     subscription = await storage.subscriptions.get_active_subscription(bot_id, user_id)
     vouchers = await storage.transactions.get_active_vouchers(bot_id, user_id)
-    payments = await _paid_count(storage, bot_id, user_id)
     referrals = await storage.referrals.get_referrals_count(bot_id, user_id)
-    text = _dossier_text(user, roles, subscription, len(vouchers), payments, referrals)
-    text = text + "\n" + await _lifecycle_lines(storage, bot_id, user, bot_display_name_provider)
+    status_row = await storage.bot_statuses.get_for_user(bot_id, user_id, telegram_bot_id)
+    text = _dossier_text(
+        user,
+        roles,
+        subscription,
+        len(vouchers),
+        referrals,
+        lifecycle=None if status_row is None else status_row.status,
+        last_seen_at=None if status_row is None else status_row.last_seen_at,
+    )
     extra_lines = await _invoke_user_port(extra_user_dossier_lines, user_id)
     if extra_lines:
-        text = text + "\n" + "\n".join(extra_lines)
+        text += "\n\n" + "\n".join(extra_lines)
     extra_rows = await _invoke_user_port(extra_user_dossier_rows, user_id)
-    return text, _dossier_keyboard(
-        user,
-        "admin" in roles,
-        extra_rows=extra_rows or (),
-        is_root=is_root,
-    )
+    return text, _dossier_keyboard(user, extra_rows=extra_rows or (), is_root=is_root)
 
 
-async def _lifecycle_lines(storage: Storage, bot_id: str, user, provider) -> str:
-    parts = []
+def _dossier_status(user, lifecycle: str | None) -> str:
+    if user.is_banned and user.is_shadow_banned:
+        return "🔴 Заблокирован · 👤🕶 Теневой бан"
     if user.is_banned:
-        parts.append("бан")
+        return "🔴 Заблокирован"
     if user.is_shadow_banned:
-        parts.append("теневой бан")
-    lines = ["Санкции сети: " + (", ".join(parts) if parts else "нет")]
-    known = await storage.bot_statuses.list_known_bots(bot_id)
-    statuses = {
-        item.telegram_bot_id: item
-        for item in await storage.bot_statuses.list_for_user(bot_id, user.user_id)
-    }
-    for bot in known:
-        label = await _bot_label(provider, bot.origin_bot_id, bot.telegram_bot_id)
-        row = statuses.get(bot.telegram_bot_id)
-        state = STATUS_LABELS[row.status] if row is not None else "неизвестно"
-        lines.append(f"{html.escape(label)}: {state}")
-    return "\n".join(lines)
+        return "👤🕶 Теневой бан"
+    if lifecycle == "deleted":
+        return "⚠️ Аккаунт удалён в Telegram"
+    if lifecycle == "stopped":
+        return "🛑 Бот остановлен пользователем"
+    return "🟢 Активен"
 
 
-async def _bot_label(provider, origin_bot_id: str, telegram_bot_id: int) -> str:
-    if provider is None:
-        return origin_bot_id
-    result = provider(origin_bot_id, telegram_bot_id)
-    if inspect.isawaitable(result):
-        result = await result
-    return str(result) if result else origin_bot_id
-
-
-def _dossier_text(user, roles: list[str], subscription, vouchers: int, payments: int, referrals: int) -> str:
-    username = f"@{html.escape(user.username)}" if user.username else "—"
+def _identity_line(user) -> str:
     name = " ".join(part for part in (user.first_name, user.last_name) if part)
-    source = html.escape(user.traffic_source) if user.traffic_source else "—"
-    vip = "Отсутствует"
-    if subscription is not None:
-        vip = "Бессрочно" if subscription.is_lifetime else f"до {subscription.expires_at[:10]}"
+    username = html.escape(user.username) if user.username else ""
+    user_code = f"<code>{user.user_id}</code>"
+    if name:
+        suffix = f" @{username}" if username else ""
+        return f"Имя: <b>{html.escape(name)}</b>{suffix} (ID: {user_code})"
+    if username:
+        return f"Username: @{username} (ID: {user_code})"
+    return f"ID: {user_code}"
+
+
+def _role_line(roles: list[str]) -> str | None:
+    if "superadmin" in roles:
+        return "Роль: Суперадминистратор"
+    if "admin" in roles:
+        return "Роль: Администратор"
+    return None
+
+
+def _subscription_line(subscription) -> str | None:
+    if subscription is None:
+        return None
+    if subscription.is_lifetime or not subscription.expires_at:
+        return "Подписка: Gift (бессрочно)"
+    day = parse_utc(subscription.expires_at).astimezone(timezone.utc).strftime("%Y-%m-%d")
+    return f"Подписка: Gift (до {day})"
+
+
+def _dossier_text(
+    user,
+    roles: list[str],
+    subscription,
+    vouchers: int,
+    referrals: int,
+    *,
+    lifecycle: str | None,
+    last_seen_at: str | None,
+) -> str:
     lines = [
-        f"👤 Досье пользователя: {username} (ID: {user.user_id})",
-        f"Имя: {html.escape(name) if name else '—'}",
-        f"📅 Первый визит: {html.escape(user.created_at)} UTC",
-        f"🌐 Язык: {html.escape(user.language_code)} | Источник / Реф: {source}",
-        "🔒 Статус: " + ("Забанен" if user.is_banned else "Активен")
-        + " (Теневой бан: " + ("ДА" if user.is_shadow_banned else "НЕТ") + ")",
-        "👑 Роли: " + (", ".join(roles) if roles else "нет"),
-        f"🎁 VIP Доступ: {vip}",
-        f"🎟 Талоны: {vouchers} шт. (Оплат всего: {payments})",
-        f"👥 Пригласил рефералов: {referrals}",
+        "<b>Досье пользователя</b>",
+        "",
+        _identity_line(user),
+        "",
+        f"Статус: {_dossier_status(user, lifecycle)}",
     ]
+    role = _role_line(roles)
+    if role:
+        lines.append(role)
+    lines.append("")
+    visit = _format_utc_minute(user.created_at)
+    if visit:
+        lines.append(f"Первый визит: {html.escape(visit)}")
+    seen = _format_utc_minute(last_seen_at)
+    if seen:
+        lines.append(f"Последняя активность: {html.escape(seen)}")
+    facts: list[str] = []
+    subscription_line = _subscription_line(subscription)
+    if subscription_line:
+        facts.append(subscription_line)
+    if vouchers > 0:
+        facts.append(f"Токены: {vouchers} шт.")
+    if referrals > 0:
+        facts.append(f"Рефералы: пригласил {referrals} чел.")
+    if facts:
+        if lines[-1] != "":
+            lines.append("")
+        lines.extend(facts)
     return "\n".join(lines)
 
 
 def _dossier_keyboard(
     user,
-    has_admin: bool,
     extra_rows: Sequence[Sequence[tuple[str, str]]] = (),
     *,
     is_root: bool = False,
@@ -1000,12 +1060,10 @@ def _dossier_keyboard(
         [InlineKeyboardButton(text=shadow_label, callback_data=_user_callback("shban", uid))],
     ]
     if is_root:
-        role_label = "🚫 Снять Admin" if has_admin else "👑 Роль Admin"
         rows.extend(
             [
                 [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
                 [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
-                [InlineKeyboardButton(text=role_label, callback_data=_user_callback("role_adm", uid))],
             ]
         )
     for row in extra_rows or ():
@@ -1074,19 +1132,6 @@ async def _apply_dossier_action(call, storage, config, bot_id: str, action: str,
                 f"Талон выдан user_id={target_id} payment_id={payment_id}. actor={actor_id}",
             )
         return None
-    has_admin = await storage.roles.has_any_role(bot_id, target_id, ("admin",))
-    if has_admin and await _is_sole_superadmin(storage, bot_id, target_id):
-        return LAST_SUPERADMIN_ROLE
-    if has_admin:
-        ok, err = await storage.roles.revoke_role(bot_id, target_id, "admin")
-        if not ok:
-            return _revoke_error(err)
-        await send_admin_audit(call.bot, config, f"Роль admin снята user_id={target_id}. actor={actor_id}")
-        return None
-    ok, err = await storage.roles.grant_role(bot_id, target_id, "admin", granted_by=actor_id)
-    if not ok:
-        return _grant_error(err)
-    await send_admin_audit(call.bot, config, f"Роль admin выдана user_id={target_id}. actor={actor_id}")
     return None
 
 
@@ -1103,20 +1148,6 @@ async def _is_sole_superadmin(storage: Storage, bot_id: str, user_id: int) -> bo
     if not await storage.roles.has_any_role(bot_id, user_id, ("superadmin",)):
         return False
     return await storage.roles.count_role(bot_id, "superadmin") == 1
-
-
-async def _paid_count(storage: Storage, bot_id: str, user_id: int) -> int:
-    def _op(conn) -> int:
-        row = conn.execute(
-            """
-            SELECT COUNT(*) AS n FROM transactions
-            WHERE bot_id = ? AND user_id = ? AND status = 'paid'
-            """,
-            (bot_id, user_id),
-        ).fetchone()
-        return int(row["n"])
-
-    return await storage.engine.run(_op)
 
 
 def _parse_gift_shape(message: Message) -> tuple[str, int | None] | None:

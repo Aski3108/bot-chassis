@@ -102,15 +102,17 @@ class TestChassisCycle(unittest.IsolatedAsyncioTestCase):
 
         await self._text(100, "/user 7")
         dossier = "\n".join(self._texts(100))
-        self.assertIn("ID: 7", dossier)
-        self.assertIn("Источник / Реф: ref_100", dossier)
-        self.assertIn("Теневой бан: НЕТ", dossier)
-        self.assertIn("Пригласил рефералов: 0", dossier)
+        self.assertIn("ID: <code>7</code>", dossier)
+        self.assertIn("Статус: 🟢 Активен", dossier)
+        self.assertNotIn("Источник", dossier)
+        self.assertNotIn("Теневой бан: НЕТ", dossier)
+        self.assertNotIn("Пригласил рефералов: 0", dossier)
 
         await self._text(100, "/user 8")
         shadow_card = self._texts(100)[-1]
-        self.assertIn("Теневой бан: ДА", shadow_card)
-        self.assertIn("Талоны: 1 шт. (Оплат всего: 1)", shadow_card)
+        self.assertIn("Статус: 👤🕶 Теневой бан", shadow_card)
+        self.assertIn("Токены: 1 шт.", shadow_card)
+        self.assertNotIn("Оплат всего", shadow_card)
 
         await self._text(100, "/refund 8 chg-shadow")
         self.assertTrue(any(item.__class__.__name__ == "RefundStarPayment" for item in self.session.requests))

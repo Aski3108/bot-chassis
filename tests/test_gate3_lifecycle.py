@@ -364,17 +364,20 @@ class TestUserLifecycle(unittest.IsolatedAsyncioTestCase):
             "network",
             7,
             bot_display_name_provider=names,
+            telegram_bot_id=101,
         )
-        self.assertIn("Санкции сети: нет", text)
-        self.assertLess(text.index("Санкции сети: нет"), text.index("BPD: активен"))
-        self.assertIn("ADHD: неизвестно", text)
-        self.assertIn("Profiling: неизвестно", text)
-        self.assertNotIn("Забанен", text)
+        self.assertIn("Статус: 🟢 Активен", text)
+        self.assertNotIn("Санкции сети", text)
+        self.assertNotIn("BPD", text)
+        self.assertNotIn("ADHD", text)
+        self.assertNotIn("Profiling", text)
 
         await self.storage.users.set_ban("network", 7, True, "spam")
-        text, _markup = await _dossier(self.storage, "network", 7, bot_display_name_provider=names)
-        self.assertIn("Санкции сети: бан", text)
-        self.assertIn("BPD: активен", text)
+        text, _markup = await _dossier(
+            self.storage, "network", 7, bot_display_name_provider=names, telegram_bot_id=101
+        )
+        self.assertIn("Статус: 🔴 Заблокирован", text)
+        self.assertNotIn("Санкции сети", text)
 
     def test_narrow_allowed_updates_are_reported(self) -> None:
         seen: list[str] = []
