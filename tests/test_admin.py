@@ -644,8 +644,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [(button.text, button.callback_data) for button in buttons],
             [
-                ("🔴 Забанить", "adm_usr:ban:16"),
-                ("👻 Теневой бан: ВКЛ", "adm_usr:shban:16"),
+                ("🔴 Санкции (Бан)", "adm_usr:menu:sanctions:16"),
                 ("« Назад", "adm_back"),
                 ("В главное меню", "adm_home"),
             ],
@@ -671,20 +670,24 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("30 дн." in item.text for item in self._named("SendMessage") if item.chat_id == -100))
 
         self.session.requests.clear()
-        await self._feed_callback(14, "adm_usr:ban:16", 7, panel)
+        await self._feed_callback(14, "adm_usr:sanction:ban:16", 7, panel)
         self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_banned)
         self.assertIn("Заблокирован", self._named("EditMessageText")[0].text)
-        self.assertIsNotNone(self._named("EditMessageText")[0].reply_markup)
+        self.assertIn(("🟢 Снять бан", "adm_usr:sanction:unban:16"), [
+            (button.text, button.callback_data)
+            for row in self._named("EditMessageText")[0].reply_markup.inline_keyboard
+            for button in row
+        ])
         self.assertFalse(any("Админка" in (item.text or "") for item in self._named("SendMessage") if item.chat_id == 14))
 
         self.session.requests.clear()
-        await self._feed_callback(14, "adm_usr:ban:100", 8, panel)
+        await self._feed_callback(14, "adm_usr:sanction:ban:100", 8, panel)
         self.assertFalse((await self.storage.users.get_user("bot_a", 100)).is_banned)
         self.assertEqual(self._named("AnswerCallbackQuery")[0].text, LAST_SUPERADMIN)
         self.assertFalse(self._named("EditMessageText"))
 
         self.session.requests.clear()
-        await self._feed_callback(14, "adm_usr:shban:14", 9, panel)
+        await self._feed_callback(14, "adm_usr:sanction:shadow_on:14", 9, panel)
         self.assertFalse((await self.storage.users.get_user("bot_a", 14)).is_shadow_banned)
         self.assertEqual(self._named("AnswerCallbackQuery")[0].text, TARGET_IS_ADMIN)
 

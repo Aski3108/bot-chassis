@@ -369,6 +369,75 @@ def create_admin_router(
         text, markup = card
         await panels.send_panel(message.bot, bot_id, actor.id, text, markup)
 
+    async def _show_sanctions_call(call, actor_id: int, target_id: int) -> bool:
+        card = await _dossier(
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(call.bot.id),
+            is_root=await _actor_is_root(actor_id),
+        )
+        profile = await storage.users.get_user(bot_id, target_id)
+        if card is None or profile is None:
+            return False
+        text, _base_markup = card
+        await panels.edit_or_send(call, bot_id, actor_id, text, _sanctions_keyboard(profile))
+        return True
+
+    async def _open_user_screen(call, actor_id: int, target_id: int, *, sanctions: bool) -> None:
+        if await storage.users.get_user(bot_id, target_id) is None:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        shown = (
+            await _show_sanctions_call(call, actor_id, target_id)
+            if sanctions
+            else await _show_dossier_call(call, actor_id, target_id, keyboard_mode="legacy")
+        )
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_usr:menu:"), staff)
+    async def handle_dossier_menu(call: CallbackQuery) -> None:
+        user = call.from_user
+        if user is None or await _is_banned(storage, bot_id, user.id):
+            await call.answer()
+            return
+        parsed = _parse_menu_callback(call.data or "")
+        if parsed is None:
+            await call.answer()
+            return
+        kind, target_id = parsed
+        await _open_user_screen(call, user.id, target_id, sanctions=kind == "sanctions")
+
+    @router.callback_query(F.data.startswith("adm_usr:sanction:"), staff)
+    async def handle_sanction_action(call: CallbackQuery) -> None:
+        user = call.from_user
+        if user is None or await _is_banned(storage, bot_id, user.id):
+            await call.answer()
+            return
+        parsed = _parse_sanction_callback(call.data or "")
+        if parsed is None:
+            await call.answer()
+            return
+        action, target_id = parsed
+        if await storage.users.get_user(bot_id, target_id) is None:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        error = await _apply_sanction(call, storage, config, bot_id, action, target_id)
+        if error:
+            await call.answer(error, show_alert=True)
+            return
+        shown = await _show_sanctions_call(call, user.id, target_id)
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        await call.answer()
+
     async def _show_dossier_call(call, actor_id: int, target_id: int, *, keyboard_mode: str = "legacy") -> bool:
         if keyboard_mode != "legacy":
             keyboard_mode = "legacy"
@@ -895,9 +964,27 @@ def _revoke_error(code: str | None) -> str:
 
 def _parse_user_callback(data: str) -> tuple[str, int] | None:
     action, _, target = data.removeprefix("adm_usr:").partition(":")
-    if action not in {"ban", "shban", "gift30", "addvouch"} or not target.isdigit():
+    if action not in {"gift30", "addvouch"} or not target.isdigit():
         return None
     return action, int(target)
+
+
+def _parse_menu_callback(data: str) -> tuple[str, int] | None:
+    parts = data.split(":")
+    if len(parts) != 4 or parts[0] != "adm_usr" or parts[1] != "menu":
+        return None
+    if parts[2] not in {"sanctions", "dossier"} or not parts[3].isdigit():
+        return None
+    return parts[2], int(parts[3])
+
+
+def _parse_sanction_callback(data: str) -> tuple[str, int] | None:
+    parts = data.split(":")
+    if len(parts) != 4 or parts[0] != "adm_usr" or parts[1] != "sanction":
+        return None
+    if parts[2] not in {"ban", "unban", "shadow_on", "shadow_off"} or not parts[3].isdigit():
+        return None
+    return parts[2], int(parts[3])
 
 
 def _user_callback(action: str, user_id: int) -> str:
@@ -1052,12 +1139,14 @@ def _dossier_keyboard(
     *,
     is_root: bool = False,
 ) -> InlineKeyboardMarkup:
-    ban_label = "🟢 Разбанить" if user.is_banned else "🔴 Забанить"
-    shadow_label = "👻 Теневой бан: ВЫКЛ" if user.is_shadow_banned else "👻 Теневой бан: ВКЛ"
     uid = user.user_id
     rows = [
-        [InlineKeyboardButton(text=ban_label, callback_data=_user_callback("ban", uid))],
-        [InlineKeyboardButton(text=shadow_label, callback_data=_user_callback("shban", uid))],
+        [
+            InlineKeyboardButton(
+                text="🔴 Санкции (Бан)",
+                callback_data=f"adm_usr:menu:sanctions:{uid}",
+            )
+        ],
     ]
     if is_root:
         rows.extend(
@@ -1082,31 +1171,64 @@ def _dossier_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _sanctions_keyboard(user) -> InlineKeyboardMarkup:
+    uid = user.user_id
+    if user.is_banned:
+        ban_label, ban_action = "🟢 Снять бан", "unban"
+    else:
+        ban_label, ban_action = "🔴 Выдать бан", "ban"
+    if user.is_shadow_banned:
+        shadow_label, shadow_action = "👤🕶 Снять теневой бан", "shadow_off"
+    else:
+        shadow_label, shadow_action = "👤🕶 Включить теневой бан", "shadow_on"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=ban_label, callback_data=f"adm_usr:sanction:{ban_action}:{uid}")],
+            [InlineKeyboardButton(text=shadow_label, callback_data=f"adm_usr:sanction:{shadow_action}:{uid}")],
+            [
+                InlineKeyboardButton(text="« Назад в досье", callback_data=f"adm_usr:menu:dossier:{uid}"),
+                InlineKeyboardButton(text="В главное меню", callback_data=CB_HOME),
+            ],
+        ]
+    )
+
+
+async def _apply_sanction(call, storage, config, bot_id: str, action: str, target_id: int) -> str | None:
+    actor_id = call.from_user.id
+    if await storage.users.get_user(bot_id, target_id) is None:
+        return USER_NOT_FOUND
+    if action == "ban":
+        ok, err = await storage.users.set_ban(bot_id, target_id, True, None)
+        if not ok:
+            return _ban_error(err)
+        await send_admin_audit(call.bot, config, f"Бан user_id={target_id}. Причина: —. actor={actor_id}")
+        return None
+    if action == "unban":
+        ok, err = await storage.users.set_ban(bot_id, target_id, False)
+        if not ok:
+            return _ban_error(err)
+        await send_admin_audit(call.bot, config, f"Разбан user_id={target_id}. actor={actor_id}")
+        return None
+    if action == "shadow_on":
+        ok, err = await storage.users.set_shadow_ban(bot_id, target_id, True)
+        if not ok:
+            return _shadow_error(err)
+        await send_admin_audit(call.bot, config, f"Теневой бан включён user_id={target_id}. actor={actor_id}")
+        return None
+    if action == "shadow_off":
+        ok, err = await storage.users.set_shadow_ban(bot_id, target_id, False)
+        if not ok:
+            return _shadow_error(err)
+        await send_admin_audit(call.bot, config, f"Теневой бан снят user_id={target_id}. actor={actor_id}")
+        return None
+    return None
+
+
 async def _apply_dossier_action(call, storage, config, bot_id: str, action: str, target_id: int) -> str | None:
     actor_id = call.from_user.id
     profile = await storage.users.get_user(bot_id, target_id)
     if profile is None:
         return USER_NOT_FOUND
-    if action == "ban":
-        enabled = not profile.is_banned
-        ok, err = await storage.users.set_ban(bot_id, target_id, enabled)
-        if not ok:
-            return _ban_error(err)
-        text = (
-            f"Бан user_id={target_id}. Причина: —. actor={actor_id}"
-            if enabled
-            else f"Разбан user_id={target_id}. actor={actor_id}"
-        )
-        await send_admin_audit(call.bot, config, text)
-        return None
-    if action == "shban":
-        enabled = not profile.is_shadow_banned
-        ok, err = await storage.users.set_shadow_ban(bot_id, target_id, enabled)
-        if not ok:
-            return _shadow_error(err)
-        state = "включён" if enabled else "снят"
-        await send_admin_audit(call.bot, config, f"Теневой бан {state} user_id={target_id}. actor={actor_id}")
-        return None
     if action == "gift30":
         ok, _err = await storage.subscriptions.grant_gift_access(bot_id, target_id, granted_by=actor_id, days=30)
         if not ok:

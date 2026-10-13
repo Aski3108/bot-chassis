@@ -38,6 +38,8 @@ from bot_chassis.admin.router import (
     SECURITY_ALERT_TTL_SECONDS,
     _SECURITY_ALERT_THROTTLE,
     _dossier,
+    _parse_sanction_callback,
+    _sanctions_keyboard,
     create_admin_router,
 )
 from bot_chassis.admin.screens import (
@@ -812,8 +814,7 @@ class TestAdminV2A1(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             _rows(markup),
             [
-                ("🔴 Забанить", "adm_usr:ban:123456789"),
-                ("👻 Теневой бан: ВКЛ", "adm_usr:shban:123456789"),
+                ("🔴 Санкции (Бан)", "adm_usr:menu:sanctions:123456789"),
                 ("« Назад", "adm_back"),
                 ("В главное меню", "adm_home"),
             ],
@@ -986,29 +987,192 @@ class TestAdminV2A1(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        await click("adm_usr:ban:16", 1)
-        await click("adm_usr:ban:16", 2)
+        await click("adm_usr:sanction:ban:16", 1)
+        await click("adm_usr:menu:dossier:16", 2)
         edits = [item for item in session.requests if item.__class__.__name__ == "EditMessageText"]
         self.assertEqual(len(edits), 2)
         self.assertIn("Статус: 🔴 Заблокирован", edits[0].text)
-        self.assertIn("Статус: 🟢 Активен", edits[1].text)
+        self.assertIn("Статус: 🔴 Заблокирован", edits[1].text)
         self.assertTrue(edits[0].text.endswith("Extra hours: 16"))
-        self.assertIsNotNone(edits[0].reply_markup)
-        self.assertIsNotNone(edits[1].reply_markup)
+        self.assertEqual(_rows(edits[0].reply_markup)[0], ("🟢 Снять бан", "adm_usr:sanction:unban:16"))
         self.assertEqual(_rows(edits[1].reply_markup)[-3], ("Grant hours", "adm_ops:grant_hours:16"))
+        self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_banned)
         homes = [
             item
             for item in session.requests
             if item.__class__.__name__ == "SendMessage" and item.chat_id == 100 and "Админка" in (item.text or "")
         ]
         self.assertFalse(homes)
-        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
 
         session.requests.clear()
         await click("adm_usr:role_adm:16", 3)
         self.assertFalse(await self.storage.roles.has_any_role("bot_a", 16, ("admin",)))
         self.assertFalse([item for item in session.requests if item.__class__.__name__ == "EditMessageText"])
         await bot.session.close()
+
+
+class TestAdminV2A2(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=os.path.join(self._tmp.name, "admin.db"),
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+        )
+        self.storage = await create_storage(self.config)
+        await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
+        self.session = _Session()
+        self.bot = Bot(token="123456:ABC", session=self.session)
+        self.dp = Dispatcher()
+        self.dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+
+    async def asyncTearDown(self) -> None:
+        await self.bot.session.close()
+        self._tmp.cleanup()
+
+    async def _click(self, user_id: int, data: str, update_id: int) -> None:
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=user_id, type="private"),
+            from_user=_user(user_id),
+            text="dossier",
+        )
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                callback_query=CallbackQuery(
+                    id=str(update_id),
+                    from_user=_user(user_id),
+                    chat_instance="x",
+                    data=data,
+                    message=panel,
+                ),
+            ),
+        )
+
+    def _edits(self):
+        return [item for item in self.session.requests if item.__class__.__name__ == "EditMessageText"]
+
+    async def _flags(self, user_id: int, *, banned: bool = False, shadow: bool = False) -> None:
+        await self.storage.users.upsert_user("bot_a", user_id, username=f"u{user_id}")
+
+        def _op(conn) -> None:
+            conn.execute(
+                """
+                UPDATE users SET is_banned = ?, is_shadow_banned = ?
+                WHERE bot_id = ? AND user_id = ?
+                """,
+                (1 if banned else 0, 1 if shadow else 0, "bot_a", user_id),
+            )
+
+        await self.storage.engine.run(_op)
+
+    def test_sanction_parser_rejects_wrong_shape_and_action(self) -> None:
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:ban:16"), ("ban", 16))
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:unban:16"), ("unban", 16))
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:shadow_on:16"), ("shadow_on", 16))
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:shadow_off:16"), ("shadow_off", 16))
+        for raw in (
+            "adm_usr:sanction:ban",
+            "adm_usr:sanction:ban:16:1",
+            "adm_usr:sanction:toggle:16",
+            "adm_usr:sanction:no_reason:16",
+            "adm_usr:sanction:cancel:16",
+            "adm_usr:ban:16",
+            "adm_usr:shban:16",
+            "adm_usr:sanction:ban:abc",
+            "adm_usr:sanction:BAN:16",
+            "",
+        ):
+            self.assertIsNone(_parse_sanction_callback(raw), raw)
+
+    async def test_sanction_menu_has_exact_labels_for_each_flag_combination(self) -> None:
+        cases = (
+            (21, False, False, "🔴 Выдать бан", "ban", "👤🕶 Включить теневой бан", "shadow_on"),
+            (22, True, False, "🟢 Снять бан", "unban", "👤🕶 Включить теневой бан", "shadow_on"),
+            (23, False, True, "🔴 Выдать бан", "ban", "👤🕶 Снять теневой бан", "shadow_off"),
+            (24, True, True, "🟢 Снять бан", "unban", "👤🕶 Снять теневой бан", "shadow_off"),
+        )
+        for user_id, banned, shadow, ban_label, ban_action, shadow_label, shadow_action in cases:
+            await self._flags(user_id, banned=banned, shadow=shadow)
+            profile = await self.storage.users.get_user("bot_a", user_id)
+            rows = _rows(_sanctions_keyboard(profile))
+            self.assertEqual(
+                rows,
+                [
+                    (ban_label, f"adm_usr:sanction:{ban_action}:{user_id}"),
+                    (shadow_label, f"adm_usr:sanction:{shadow_action}:{user_id}"),
+                    ("« Назад в досье", f"adm_usr:menu:dossier:{user_id}"),
+                    ("В главное меню", CB_HOME),
+                ],
+            )
+            joined = " ".join(label for label, _data in rows)
+            self.assertNotIn("Забанить", joined)
+            self.assertNotIn("Разбанить", joined)
+            self.assertNotIn("Shadow", joined)
+
+    async def test_sanction_menu_uses_fresh_flags(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 16, username="neo")
+        await self._click(14, "adm_usr:menu:sanctions:16", 1)
+        self.assertEqual(_rows(self._edits()[0].reply_markup)[0], ("🔴 Выдать бан", "adm_usr:sanction:ban:16"))
+        await self._flags(16, banned=True)
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:menu:sanctions:16", 2)
+        self.assertEqual(_rows(self._edits()[0].reply_markup)[0], ("🟢 Снять бан", "adm_usr:sanction:unban:16"))
+        self.assertIn("Статус: 🔴 Заблокирован", self._edits()[0].text)
+
+    async def test_unban_and_shadow_off_are_explicit_idempotent_sets(self) -> None:
+        await self._flags(16, banned=True, shadow=True)
+        await self._click(14, "adm_usr:sanction:unban:16", 1)
+        await self._click(14, "adm_usr:sanction:unban:16", 2)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_shadow_banned)
+        edits = self._edits()
+        self.assertEqual(len(edits), 2)
+        self.assertEqual(_rows(edits[0].reply_markup)[0], ("🔴 Выдать бан", "adm_usr:sanction:ban:16"))
+        self.assertEqual(_rows(edits[1].reply_markup)[0], ("🔴 Выдать бан", "adm_usr:sanction:ban:16"))
+        self.assertIn("Статус: 👤🕶 Теневой бан", edits[1].text)
+        homes = [
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "SendMessage" and item.chat_id == 14 and "Админка" in (item.text or "")
+        ]
+        self.assertFalse(homes)
+
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:shadow_off:16", 3)
+        await self._click(14, "adm_usr:sanction:shadow_off:16", 4)
+        profile = await self.storage.users.get_user("bot_a", 16)
+        self.assertFalse(profile.is_banned)
+        self.assertFalse(profile.is_shadow_banned)
+        later = self._edits()
+        self.assertEqual(_rows(later[-1].reply_markup)[1], ("👤🕶 Включить теневой бан", "adm_usr:sanction:shadow_on:16"))
+        self.assertIn("Статус: 🟢 Активен", later[-1].text)
+
+    async def test_sanction_error_does_not_render_success(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 16, username="neo")
+        await self._click(14, "adm_usr:sanction:ban:100", 1)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 100)).is_banned)
+        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
+        self.assertEqual(answers[-1].text, "Нельзя забанить последнего суперадмина")
+        self.assertTrue(answers[-1].show_alert)
+        self.assertFalse(self._edits())
+
+        self.session.requests.clear()
+        await self._click(100, "adm_usr:sanction:shadow_on:14", 2)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 14)).is_shadow_banned)
+        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
+        self.assertEqual(answers[-1].text, "Нельзя наложить тень на admin или superadmin")
+        self.assertTrue(answers[-1].show_alert)
+        self.assertFalse(self._edits())
+
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:no_reason:16", 3)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertFalse(self._edits())
 
 
 if __name__ == "__main__":
