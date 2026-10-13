@@ -46,7 +46,9 @@ from bot_chassis.admin.router import (
     _SECURITY_ALERT_THROTTLE,
     _dossier,
     _parse_sanction_callback,
+    _parse_subscription_callback,
     _sanctions_keyboard,
+    _subscription_keyboard,
     create_admin_router,
 )
 from bot_chassis.admin.screens import (
@@ -861,8 +863,9 @@ class TestAdminV2A1(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, _FULL_DOSSIER)
         self.assertNotIn("Администратор\n", text)
         self.assertNotIn("adm_usr:role_adm:", "".join(item[1] for item in _rows(markup)))
-        self.assertIn(("🎁 +30 дней VIP", "adm_usr:gift30:554750808"), _rows(markup))
-        self.assertIn(("🎟 +1 талон", "adm_usr:addvouch:554750808"), _rows(markup))
+        self.assertIn(("🎁 Управление подпиской", "adm_usr:menu:subscription:554750808"), _rows(markup))
+        self.assertNotIn("adm_usr:gift30:", "".join(item[1] for item in _rows(markup)))
+        self.assertNotIn("adm_usr:addvouch:", "".join(item[1] for item in _rows(markup)))
 
     async def test_dossier_formats_utc_without_seconds_or_local_shift(self) -> None:
         await self._user(610, username="u<i>", first_name="A<b>", created_at="2026-10-05 21:30:45")
@@ -1396,6 +1399,199 @@ class TestAdminV2A3(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.store.get(14, scope=PendingScope.USER).kind, PendingInputKind.SUPPORT_MESSAGE)
         self.assertEqual(other.get(14, scope=PendingScope.ADMIN).kind, PendingInputKind.ADMIN_LOOKUP)
+
+
+class TestAdminV2A4(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=os.path.join(self._tmp.name, "admin.db"),
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+        )
+        self.storage = await create_storage(self.config)
+        await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
+        await self.storage.users.upsert_user("bot_a", 16, username="neo")
+        self.session = _Session()
+        self.bot = Bot(token="123456:ABC", session=self.session)
+        self.dp = Dispatcher()
+        self.dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+
+    async def asyncTearDown(self) -> None:
+        await self.bot.session.close()
+        self._tmp.cleanup()
+
+    async def _click(self, user_id: int, data: str, update_id: int) -> None:
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=user_id, type="private"),
+            from_user=_user(user_id),
+            text="dossier",
+        )
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                callback_query=CallbackQuery(
+                    id=str(update_id),
+                    from_user=_user(user_id),
+                    chat_instance="x",
+                    data=data,
+                    message=panel,
+                ),
+            ),
+        )
+
+    def _edits(self):
+        return [item for item in self.session.requests if item.__class__.__name__ == "EditMessageText"]
+
+    def _audits(self):
+        return [
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "SendMessage"
+            and item.chat_id == -100
+            and "несанкционированного доступа" in (item.text or "")
+        ]
+
+    async def test_subscription_entry_is_root_only_even_when_forged(self) -> None:
+        _staff_text, staff_markup = await _dossier(
+            self.storage, "bot_a", 16, telegram_bot_id=123456, is_root=False
+        )
+        _root_text, root_markup = await _dossier(
+            self.storage, "bot_a", 16, telegram_bot_id=123456, is_root=True
+        )
+        self.assertEqual(_rows(staff_markup)[0], ("🔴 Санкции (Бан)", "adm_usr:menu:sanctions:16"))
+        self.assertNotIn("adm_usr:menu:subscription:", "".join(item[1] for item in _rows(staff_markup)))
+        self.assertEqual(_rows(root_markup)[1], ("🎁 Управление подпиской", "adm_usr:menu:subscription:16"))
+        forged = (
+            "adm_usr:menu:subscription:16",
+            "adm_usr:sub:gift30:16",
+            "adm_usr:sub:giftlife:16",
+            "adm_usr:sub:token:16",
+            "adm_usr:sub:revoke:16",
+            "adm_usr:gift30:16",
+            "adm_usr:addvouch:16",
+        )
+        for index, data in enumerate(forged, start=1):
+            await self._click(14, data, index)
+        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
+        denied = [item for item in answers if item.text == "Access Denied"]
+        self.assertEqual(len(denied), 5)
+        self.assertTrue(all(item.show_alert for item in denied))
+        self.assertFalse(self._edits())
+        self.assertEqual(len(self._audits()), 5)
+        self.assertIsNone(await self.storage.subscriptions.get_active_subscription("bot_a", 16))
+        self.assertFalse(await self.storage.transactions.get_active_vouchers("bot_a", 16))
+
+    async def test_subscription_menu_has_exact_labels_and_rows(self) -> None:
+        self.assertEqual(_parse_subscription_callback("adm_usr:sub:gift30:16"), ("gift30", 16))
+        self.assertEqual(_parse_subscription_callback("adm_usr:sub:giftlife:16"), ("giftlife", 16))
+        self.assertEqual(_parse_subscription_callback("adm_usr:sub:token:16"), ("token", 16))
+        self.assertEqual(_parse_subscription_callback("adm_usr:sub:revoke:16"), ("revoke", 16))
+        for raw in ("adm_usr:sub:gift30", "adm_usr:sub:gift30:16:1", "adm_usr:sub:toggle:16", "adm_usr:gift30:16", ""):
+            self.assertIsNone(_parse_subscription_callback(raw), raw)
+        empty = [
+            [(button.text, button.callback_data) for button in row]
+            for row in _subscription_keyboard(16, has_subscription=False).inline_keyboard
+        ]
+        self.assertEqual(
+            empty,
+            [
+                [
+                    ("🎁 Подарить 30 дней", "adm_usr:sub:gift30:16"),
+                    ("♾ Подарить бессрочно", "adm_usr:sub:giftlife:16"),
+                ],
+                [("🎟 Начислить +1 токен", "adm_usr:sub:token:16")],
+                [
+                    ("« Назад в досье", "adm_usr:menu:dossier:16"),
+                    ("В главное меню", CB_HOME),
+                ],
+            ],
+        )
+        full = [
+            [(button.text, button.callback_data) for button in row]
+            for row in _subscription_keyboard(16, has_subscription=True).inline_keyboard
+        ]
+        self.assertEqual(full[2], [("🚫 Отозвать подписку/Gift", "adm_usr:sub:revoke:16")])
+        self.assertEqual(full[3][0][0], "« Назад в досье")
+
+    async def test_subscription_giftlife_token_and_revoke(self) -> None:
+        await self._click(100, "adm_usr:sub:giftlife:16", 1)
+        gift = await self.storage.subscriptions.get_active_subscription("bot_a", 16)
+        self.assertTrue(gift.is_lifetime)
+        self.assertIn("Подписка: Gift (бессрочно)", self._edits()[0].text)
+        self.assertIn(("🚫 Отозвать подписку/Gift", "adm_usr:sub:revoke:16"), _rows(self._edits()[0].reply_markup))
+        self.session.requests.clear()
+        await self._click(100, "adm_usr:sub:token:16", 2)
+        vouchers = await self.storage.transactions.get_active_vouchers("bot_a", 16)
+        self.assertEqual(len(vouchers), 1)
+        self.assertEqual(vouchers[0].amount, 0)
+        self.assertEqual(vouchers[0].provider, "admin_grant")
+        self.assertIn("Токены: 1 шт.", self._edits()[0].text)
+        self.session.requests.clear()
+        await self._click(100, "adm_usr:sub:revoke:16", 3)
+        self.assertIsNone(await self.storage.subscriptions.get_active_subscription("bot_a", 16))
+        labels = [label for label, _data in _rows(self._edits()[0].reply_markup)]
+        self.assertNotIn("🚫 Отозвать подписку/Gift", labels)
+        self.assertNotIn("Подписка:", self._edits()[0].text)
+        homes = [
+            item
+            for item in self.session.requests
+            if item.__class__.__name__ == "SendMessage" and item.chat_id == 100 and "Админка" in (item.text or "")
+        ]
+        self.assertFalse(homes)
+
+    async def test_subscription_success_rerenders_fresh_state(self) -> None:
+        await self._click(100, "adm_usr:menu:subscription:16", 1)
+        self.assertNotIn("Отозвать", " ".join(label for label, _data in _rows(self._edits()[0].reply_markup)))
+        self.session.requests.clear()
+        await self._click(100, "adm_usr:sub:gift30:16", 2)
+        self.assertIn("Подписка: Gift (до ", self._edits()[0].text)
+        self.assertIn(("🚫 Отозвать подписку/Gift", "adm_usr:sub:revoke:16"), _rows(self._edits()[0].reply_markup))
+        self.assertTrue(any("30 дн." in (item.text or "") for item in self.session.requests if item.chat_id == -100))
+
+        failing = _FailingEditSession(2, "message is not modified")
+        bot = Bot(token="123456:ABC", session=failing)
+        dispatcher = Dispatcher()
+        dispatcher.include_router(create_admin_router("bot_a", self.storage, self.config))
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=100, type="private"),
+            from_user=_user(100),
+            text="dossier",
+        )
+
+        async def click(data: str, update_id: int) -> None:
+            await dispatcher.feed_update(
+                bot,
+                Update(
+                    update_id=update_id,
+                    callback_query=CallbackQuery(
+                        id=str(update_id),
+                        from_user=_user(100),
+                        chat_instance="x",
+                        data=data,
+                        message=panel,
+                    ),
+                ),
+            )
+
+        await click("adm_usr:sub:gift30:16", 3)
+        await click("adm_usr:sub:gift30:16", 4)
+        gift = await self.storage.subscriptions.get_active_subscription("bot_a", 16)
+        self.assertIsNotNone(gift)
+        self.assertFalse(gift.is_lifetime)
+        homes = [
+            item
+            for item in failing.requests
+            if item.__class__.__name__ == "SendMessage" and item.chat_id == 100 and "Админка" in (item.text or "")
+        ]
+        self.assertFalse(homes)
+        await bot.session.close()
 
 
 if __name__ == "__main__":

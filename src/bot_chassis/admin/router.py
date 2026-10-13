@@ -399,6 +399,113 @@ def create_admin_router(
         await panels.edit_or_send(call, bot_id, actor_id, text, _sanctions_keyboard(profile))
         return True
 
+    async def _show_subscription_call(call, actor_id: int, target_id: int) -> bool:
+        card = await _dossier(
+            storage,
+            bot_id,
+            target_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(call.bot.id),
+            is_root=True,
+        )
+        if card is None:
+            return False
+        text, _base_markup = card
+        active = await storage.subscriptions.get_active_subscription(bot_id, target_id)
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            actor_id,
+            text,
+            _subscription_keyboard(target_id, has_subscription=active is not None),
+        )
+        return True
+
+    async def _apply_subscription(call, action: str, target_id: int) -> str | None:
+        actor_id = call.from_user.id
+        if action == "gift30":
+            ok, _err = await storage.subscriptions.grant_gift_access(
+                bot_id, target_id, granted_by=actor_id, days=30
+            )
+            if not ok:
+                return GIFT_NOT_FOUND
+            await send_admin_audit(call.bot, config, f"Подарок выдан user_id={target_id} (30 дн.). actor={actor_id}")
+            return None
+        if action == "giftlife":
+            ok, _err = await storage.subscriptions.grant_gift_access(
+                bot_id, target_id, granted_by=actor_id, days=None
+            )
+            if not ok:
+                return GIFT_NOT_FOUND
+            await send_admin_audit(call.bot, config, f"Подарок выдан user_id={target_id} (бессрочно). actor={actor_id}")
+            return None
+        if action == "revoke":
+            ok, _err = await storage.subscriptions.revoke_gift_access(bot_id, target_id)
+            if not ok:
+                return GIFT_NOT_FOUND
+            await send_admin_audit(call.bot, config, f"Подарок отозван user_id={target_id}. actor={actor_id}")
+            return None
+        if action == "token":
+            payment_id = f"admin:{uuid.uuid4()}"
+            _record, created = await storage.transactions.record_successful_payment(
+                bot_id=bot_id,
+                user_id=target_id,
+                sku_code="admin_grant",
+                amount=0,
+                telegram_payment_charge_id=payment_id,
+                provider="admin_grant",
+                payment_id=payment_id,
+                currency="XTR",
+            )
+            if created:
+                await send_admin_audit(
+                    call.bot,
+                    config,
+                    f"Талон выдан user_id={target_id} payment_id={payment_id}. actor={actor_id}",
+                )
+            return None
+        return None
+
+    @router.callback_query(F.data.startswith("adm_usr:menu:subscription:"), staff)
+    async def handle_subscription_menu(call: CallbackQuery) -> None:
+        actor = await _require_root_call(call, "🎁 Управление подпиской")
+        if actor is None:
+            return
+        target_id = _parse_subscription_entry(call.data or "")
+        if target_id is None:
+            await call.answer()
+            return
+        shown = await _show_subscription_call(call, actor.id, target_id)
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_usr:sub:"), staff)
+    async def handle_subscription_action(call: CallbackQuery) -> None:
+        parsed = _parse_subscription_callback(call.data or "")
+        if parsed is None:
+            await call.answer()
+            return
+        action, target_id = parsed
+        actor = await _require_root_call(call, _SUBSCRIPTION_ACTION_LABELS[action])
+        if actor is None:
+            return
+        if await storage.users.get_user(bot_id, target_id) is None:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        error = await _apply_subscription(call, action, target_id)
+        if error:
+            await call.answer(error, show_alert=True)
+            return
+        shown = await _show_subscription_call(call, actor.id, target_id)
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        await call.answer()
+
     async def _open_user_screen(call, actor_id: int, target_id: int, *, sanctions: bool) -> None:
         if await storage.users.get_user(bot_id, target_id) is None:
             await call.answer(USER_NOT_FOUND, show_alert=True)
@@ -555,29 +662,6 @@ def create_admin_router(
 
     @router.callback_query(F.data.startswith("adm_usr:"), staff)
     async def handle_user_action(call: CallbackQuery) -> None:
-        user = call.from_user
-        if user is None or await _is_banned(storage, bot_id, user.id):
-            await call.answer()
-            return
-        parsed = _parse_user_callback(call.data or "")
-        if parsed is None:
-            await call.answer()
-            return
-        action, target_id = parsed
-        if action in {"gift30", "addvouch"} and not await root(call):
-            await call.answer(SUPERADMIN_ONLY, show_alert=True)
-            return
-        if await storage.users.get_user(bot_id, target_id) is None:
-            await call.answer(USER_NOT_FOUND, show_alert=True)
-            return
-        error = await _apply_dossier_action(call, storage, config, bot_id, action, target_id)
-        if error:
-            await call.answer(error, show_alert=True)
-            return
-        shown = await _show_dossier_call(call, user.id, target_id, keyboard_mode="legacy")
-        if not shown:
-            await call.answer(USER_NOT_FOUND, show_alert=True)
-            return
         await call.answer()
 
     @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
@@ -1110,11 +1194,20 @@ def _revoke_error(code: str | None) -> str:
     return INVALID_ROLE
 
 
-def _parse_user_callback(data: str) -> tuple[str, int] | None:
-    action, _, target = data.removeprefix("adm_usr:").partition(":")
-    if action not in {"gift30", "addvouch"} or not target.isdigit():
+def _parse_subscription_entry(data: str) -> int | None:
+    parts = data.split(":")
+    if len(parts) != 4 or parts[:3] != ["adm_usr", "menu", "subscription"] or not parts[3].isdigit():
         return None
-    return action, int(target)
+    return int(parts[3])
+
+
+def _parse_subscription_callback(data: str) -> tuple[str, int] | None:
+    parts = data.split(":")
+    if len(parts) != 4 or parts[0] != "adm_usr" or parts[1] != "sub":
+        return None
+    if parts[2] not in {"gift30", "giftlife", "token", "revoke"} or not parts[3].isdigit():
+        return None
+    return parts[2], int(parts[3])
 
 
 def _clip_reason(reason: str) -> str:
@@ -1180,10 +1273,6 @@ def _parse_sanction_callback(data: str) -> tuple[str, int] | None:
     if parts[2] not in {"ban", "unban", "shadow_on", "shadow_off", "no_reason", "cancel"} or not parts[3].isdigit():
         return None
     return parts[2], int(parts[3])
-
-
-def _user_callback(action: str, user_id: int) -> str:
-    return f"adm_usr:{action}:{user_id}"
 
 
 async def _invoke_user_port(port, user_id: int):
@@ -1344,10 +1433,12 @@ def _dossier_keyboard(
         ],
     ]
     if is_root:
-        rows.extend(
+        rows.append(
             [
-                [InlineKeyboardButton(text="🎁 +30 дней VIP", callback_data=_user_callback("gift30", uid))],
-                [InlineKeyboardButton(text="🎟 +1 талон", callback_data=_user_callback("addvouch", uid))],
+                InlineKeyboardButton(
+                    text="🎁 Управление подпиской",
+                    callback_data=f"adm_usr:menu:subscription:{uid}",
+                )
             ]
         )
     for row in extra_rows or ():
@@ -1360,6 +1451,51 @@ def _dossier_keyboard(
     rows.append(
         [
             InlineKeyboardButton(text="« Назад", callback_data=CB_BACK),
+            InlineKeyboardButton(text="В главное меню", callback_data=CB_HOME),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+_SUBSCRIPTION_ACTION_LABELS = {
+    "gift30": "🎁 Подарить 30 дней",
+    "giftlife": "♾ Подарить бессрочно",
+    "token": "🎟 Начислить +1 токен",
+    "revoke": "🚫 Отозвать подписку/Gift",
+}
+
+
+def _subscription_keyboard(user_id: int, *, has_subscription: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="🎁 Подарить 30 дней",
+                callback_data=f"adm_usr:sub:gift30:{user_id}",
+            ),
+            InlineKeyboardButton(
+                text="♾ Подарить бессрочно",
+                callback_data=f"adm_usr:sub:giftlife:{user_id}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🎟 Начислить +1 токен",
+                callback_data=f"adm_usr:sub:token:{user_id}",
+            )
+        ],
+    ]
+    if has_subscription:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🚫 Отозвать подписку/Gift",
+                    callback_data=f"adm_usr:sub:revoke:{user_id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="« Назад в досье", callback_data=f"adm_usr:menu:dossier:{user_id}"),
             InlineKeyboardButton(text="В главное меню", callback_data=CB_HOME),
         ]
     )
@@ -1415,39 +1551,6 @@ async def _apply_sanction(call, storage, config, bot_id: str, action: str, targe
         if not ok:
             return _shadow_error(err)
         await send_admin_audit(call.bot, config, f"Теневой бан снят user_id={target_id}. actor={actor_id}")
-        return None
-    return None
-
-
-async def _apply_dossier_action(call, storage, config, bot_id: str, action: str, target_id: int) -> str | None:
-    actor_id = call.from_user.id
-    profile = await storage.users.get_user(bot_id, target_id)
-    if profile is None:
-        return USER_NOT_FOUND
-    if action == "gift30":
-        ok, _err = await storage.subscriptions.grant_gift_access(bot_id, target_id, granted_by=actor_id, days=30)
-        if not ok:
-            return GIFT_NOT_FOUND
-        await send_admin_audit(call.bot, config, f"Подарок выдан user_id={target_id} (30 дн.). actor={actor_id}")
-        return None
-    if action == "addvouch":
-        payment_id = f"admin:{uuid.uuid4()}"
-        _record, created = await storage.transactions.record_successful_payment(
-            bot_id=bot_id,
-            user_id=target_id,
-            sku_code="admin_grant",
-            amount=0,
-            telegram_payment_charge_id=payment_id,
-            provider="admin_grant",
-            payment_id=payment_id,
-            currency="XTR",
-        )
-        if created:
-            await send_admin_audit(
-                call.bot,
-                config,
-                f"Талон выдан user_id={target_id} payment_id={payment_id}. actor={actor_id}",
-            )
         return None
     return None
 

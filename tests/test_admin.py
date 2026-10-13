@@ -58,7 +58,6 @@ from bot_chassis.admin.router import (
     REFUND_USAGE,
     ROLE_NOT_FOUND,
     SHADOW_USAGE,
-    SUPERADMIN_ONLY,
     TARGET_IS_ADMIN,
     USER_NOT_FOUND,
     USER_USAGE,
@@ -651,13 +650,13 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
 
         panel = Message(message_id=50, date=1, chat=Chat(id=14, type="private"), text="dossier")
         self.session.requests.clear()
-        await self._feed_callback(14, "adm_usr:gift30:16", 5, panel)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, SUPERADMIN_ONLY)
+        await self._feed_callback(14, "adm_usr:sub:gift30:16", 5, panel)
+        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, "Access Denied")
         self.assertTrue(self._named("AnswerCallbackQuery")[0].show_alert)
         self.assertIsNone(await self.storage.subscriptions.get_active_subscription("bot_a", 16))
 
         self.session.requests.clear()
-        await self._feed_callback(100, "adm_usr:gift30:16", 6, panel)
+        await self._feed_callback(100, "adm_usr:sub:gift30:16", 6, panel)
         gift = await self.storage.subscriptions.get_active_subscription("bot_a", 16)
         self.assertIsNotNone(gift)
         self.assertFalse(gift.is_lifetime)
@@ -700,7 +699,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertIn(TARGET_IS_ADMIN, [item.text for item in self._named("SendMessage") if item.chat_id == 14])
 
         self.session.requests.clear()
-        await self._feed_callback(100, "adm_usr:addvouch:16", 10, panel)
+        await self._feed_callback(100, "adm_usr:sub:token:16", 10, panel)
         vouchers = await self.storage.transactions.get_active_vouchers("bot_a", 16)
         self.assertEqual(len(vouchers), 1)
         self.assertEqual(vouchers[0].provider, "admin_grant")

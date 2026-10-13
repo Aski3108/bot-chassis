@@ -443,7 +443,14 @@ Gift-подписки: <b>{gifts}</b>
 
 **Цель:** новая карточка данных и общий безопасный механизм её обновления. На этом Gate сохраняются старые action-кнопки; финальная иерархия кнопок достраивается A2–A4, чтобы ни один промежуточный коммит не имел кнопок без handler.
 
-**Файлы:** `admin/router.py`, `storage/repositories/user_bot_statuses.py`, `tests/test_admin_v2.py`; обновить dossier-ожидания в `tests/test_admin.py`.
+**Файлы:** `admin/router.py`, `storage/repositories/user_bot_statuses.py`,
+`tests/test_admin_v2.py`; обновить dossier-ожидания в `tests/test_admin.py`.
+Разрешены также ровно три неизбежные регрессии старого досье без изменения
+остального смысла тестов: `tests/test_gate3_lifecycle.py` — передать
+обязательный `telegram_bot_id` и заменить удалённую мультибот-таблицу на
+статус текущего Telegram-бота; `tests/test_gate4_lookup.py` — ожидать ID в
+`<code>`; `tests/test_integration.py` — ожидать новые строки статуса и токенов
+и отсутствие удалённых нулевых/технических строк.
 
 **Данные lifecycle:**
 1. Расширить `UserBotStatus` полем `last_seen_at: str` и выбирать его в `list_for_user`.
@@ -1002,10 +1009,12 @@ else:
 | `tests/test_admin_v2.py` | Создать новые тесты A0–A7 | Проверять внутренности кузовов |
 | `tests/test_payments.py` | Только намеренно изменившийся invoice markup/cancel | Переписывать pre-checkout/successful-payment контракт |
 | `tests/test_admin.py` | Старые ожидания текста, кнопок и Stay-in-Dossier; A3 — собственный PendingInputStore вместо global reset | Ослаблять ACL, tenant isolation, команды и ошибки |
-| `tests/test_gate4_lookup.py` | A3 — обязательный PendingInputStore, удаление проверок legacy-global с сохранением поведения lookup | Ослаблять TTL, команды, cancel и изоляцию состояний |
+| `tests/test_gate3_lifecycle.py` | A1 — только существующий dossier-блок: обязательный `telegram_bot_id`, статус текущего бота и отсутствие удалённой мультибот-таблицы | Менять lifecycle handlers, transition/alert semantics и остальные тесты файла |
+| `tests/test_gate4_lookup.py` | A1 — только ожидание dossier-ID в `<code>`; A3 — обязательный PendingInputStore, удаление проверок legacy-global с сохранением поведения lookup | Ослаблять TTL, команды, cancel и изоляцию состояний |
 | `tests/test_gate5a_support.py` | A3 — общий переданный store для lookup/support и отказ от global reset | Ослаблять разделение scopes и приоритет support |
 | `tests/test_gate9_admin.py` | Старые ожидания home/nav/export/backup; A3 — собственный store вместо global reset | Удалять проверки безопасности и screen lifecycle |
 | `tests/test_gate10_process.py` | A0 — только два ожидания staff-сценария restart под новый видимый menu/server-side guard; A3 — собственный store вместо global reset | Ослаблять ACL и process-control сценарии; в A0 менять любые другие блоки |
+| `tests/test_integration.py` | A1 — только существующий dossier-блок: новые строки статуса/токенов и отсутствие удалённых нулевых/технических строк | Менять прочие интеграционные сценарии, платежи, referrals и middleware |
 | `tests/test_gate7_backup.py` | A7: новый default, explicit False, новый текст notification | Ослаблять integrity, rotation, fencing, timeout |
 | `tests/test_gate8_reports.py` | A7: новый human-readable текст | Удалять weekly/monthly, periods, claims и delivery tests |
 | `tests/test_gate12_release.py` | P3 default False и A7 explicit False; default backup остаётся None | Ослаблять keyword-only и остальные None-default контракты |
