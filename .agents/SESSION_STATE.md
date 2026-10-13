@@ -23,23 +23,21 @@
 `134334d`. Ops Sidecar записан как будущая инициатива в
 `.agents/OPS_SIDECAR_CONCEPT.md`; в `0.3.1` он не входит.
 
-Release 2.0 идёт по `.agents/UPGRADE_2_0_PLAN_AUDIT.md`. S4-A/B/C, P1–P3 и A0
-закоммичены. A0 прошёл проверку: общее видимое меню staff/root, server-side
-root guard с throttled HTML-audit, отдельная DB-панель и прямое выполнение
-Excel/backup без промежуточных legacy-экранов. Версия пакета остаётся
-`0.3.1`. Целевая `2.0.0` выставляется только в Gate R2.
+Release 2.0 идёт по `.agents/UPGRADE_2_0_PLAN_AUDIT.md`. S4-A/B/C, P1–P3,
+A0 и A6 закоммичены. B3 прошёл с PASS: admin ACL, tenant/bot-изоляция,
+7-дневная активность, санкции и Stars-статистика соответствуют контракту.
+Версия пакета остаётся `0.3.1`. Целевая `2.0.0` выставляется только в Gate R2.
 
 ## Проверка
 
-- `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.py -q` → **42 passed**;
-- `py -m pytest tests/test_gate10_process.py -q` → **11 passed**;
-- `py -m pytest tests -q` → **272 passed** после A0;
+- `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.py -q` → **47 passed**;
+- `py -m pytest tests -q` → **277 passed** после A6;
 - `py -m pytest tests/test_chassis.py -q` → **19 passed**;
 - `py -m compileall -q src tests` и `git diff --check` → чисто.
 
 ## Следующее действие
 
-1. A0 закрыт с PASS. Следующий Gate — A6; не начинать без отдельной команды владельца.
+1. B3 закрыт с PASS. Следующий Gate — A1; не начинать без отдельной команды владельца.
 2. Не push и не запускать live Telegram smoke без отдельной команды.
 3. Gate 13, payment-delivery queue и Ops Sidecar не смешивать с Release 2.0.
 
