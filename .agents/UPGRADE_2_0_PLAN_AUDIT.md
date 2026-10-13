@@ -330,7 +330,7 @@ async def _deliver_start_result(message: Message, user_id: int, rendered: object
 
 **Цель:** единое видимое меню для staff/root, root-проверка на серверной стороне, отдельный рабочий экран БД и отсутствие legacy-экранов export/backup.
 
-**Файлы:** `admin/screens.py`, `admin/router.py`, `admin/broadcast.py`, `admin/process.py`, `admin/__init__.py`, `tests/test_admin_v2.py`; обновить намеренно устаревшие ожидания в `tests/test_admin.py` и `tests/test_gate9_admin.py`.
+**Файлы:** `admin/screens.py`, `admin/router.py`, `admin/broadcast.py`, `admin/process.py`, `admin/__init__.py`, `tests/test_admin_v2.py`; обновить намеренно устаревшие ожидания в `tests/test_admin.py` и `tests/test_gate9_admin.py`, а в `tests/test_gate10_process.py` — только два ожидания существующего staff-сценария: видимость restart при подключённом process port и отказ `Access Denied` с `show_alert=True` для forged callback.
 
 **Константы:**
 ```python
@@ -1005,7 +1005,7 @@ else:
 | `tests/test_gate4_lookup.py` | A3 — обязательный PendingInputStore, удаление проверок legacy-global с сохранением поведения lookup | Ослаблять TTL, команды, cancel и изоляцию состояний |
 | `tests/test_gate5a_support.py` | A3 — общий переданный store для lookup/support и отказ от global reset | Ослаблять разделение scopes и приоритет support |
 | `tests/test_gate9_admin.py` | Старые ожидания home/nav/export/backup; A3 — собственный store вместо global reset | Удалять проверки безопасности и screen lifecycle |
-| `tests/test_gate10_process.py` | A3 — собственный store вместо global reset | Ослаблять ACL и process-control сценарии |
+| `tests/test_gate10_process.py` | A0 — только два ожидания staff-сценария restart под новый видимый menu/server-side guard; A3 — собственный store вместо global reset | Ослаблять ACL и process-control сценарии; в A0 менять любые другие блоки |
 | `tests/test_gate7_backup.py` | A7: новый default, explicit False, новый текст notification | Ослаблять integrity, rotation, fencing, timeout |
 | `tests/test_gate8_reports.py` | A7: новый human-readable текст | Удалять weekly/monthly, periods, claims и delivery tests |
 | `tests/test_gate12_release.py` | P3 default False и A7 explicit False; default backup остаётся None | Ослаблять keyword-only и остальные None-default контракты |
