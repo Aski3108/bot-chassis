@@ -10,6 +10,7 @@ from aiogram import F
 from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import Message
+from loguru import logger
 
 from .admin.router import create_admin_router
 from .config import BotChassisConfig, resolved_origin
@@ -108,6 +109,7 @@ async def create_complete_chassis(
     backup_policy=None,
     reporting_policy=None,
     process_control=None,
+    single_message_start: bool = False,
 ) -> CompleteChassis:
     if storage is None:
         storage = await create_storage(config)
@@ -201,7 +203,20 @@ async def create_complete_chassis(
                 resolved_thread_store = SupportThreadStore()
         resolved_support_inline = extra_support_inline or ()
 
-        async def _deliver_start_card(message: Message, user_id: int) -> None:
+        async def _render_start_result(message: Message, user_id: int) -> object:
+            if render_start_callback is None:
+                return None
+            locale = locale_cache.get(user_id) or config.default_locale
+            return await render_start_callback(
+                StartRenderContext(
+                    message=message,
+                    user_id=user_id,
+                    bot=message.bot,
+                    locale=locale,
+                )
+            )
+
+        async def _deliver_start_result(message: Message, user_id: int, rendered: object) -> None:
             locale = locale_cache.get(user_id) or config.default_locale
 
             async def _fallback_card() -> None:
@@ -217,17 +232,6 @@ async def create_complete_chassis(
                 delivered = await message.answer(text, reply_markup=markup, parse_mode="HTML")
                 screens.remember_card(user_id, delivered.chat.id, delivered.message_id)
 
-            if render_start_callback is None:
-                await _fallback_card()
-                return
-            rendered = await render_start_callback(
-                StartRenderContext(
-                    message=message,
-                    user_id=user_id,
-                    bot=message.bot,
-                    locale=locale,
-                )
-            )
             if isinstance(rendered, Message):
                 screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
                 return
@@ -247,6 +251,10 @@ async def create_complete_chassis(
                 return
             await _fallback_card()
 
+        async def _deliver_start_card(message: Message, user_id: int) -> None:
+            rendered = await _render_start_result(message, user_id)
+            await _deliver_start_result(message, user_id, rendered)
+
         async def _on_support_back(message: Message, user_id: int) -> None:
             await _deliver_start_card(message, user_id)
 
@@ -258,6 +266,9 @@ async def create_complete_chassis(
                 resolved_pending,
                 screens,
                 deliver_start_card=_deliver_start_card,
+                single_message_start=single_message_start,
+                render_start_result=_render_start_result,
+                deliver_start_result=_deliver_start_result,
             )
         )
         dp.include_router(
@@ -353,6 +364,9 @@ def _create_start_router(
     screens: UserScreenTracker,
     *,
     deliver_start_card: Callable[[Message, int], Awaitable[None]],
+    single_message_start: bool = False,
+    render_start_result: Callable[[Message, int], Awaitable[object]] | None = None,
+    deliver_start_result: Callable[[Message, int, object], Awaitable[None]] | None = None,
 ) -> Router:
     router = Router(name="chassis_start")
 
@@ -368,8 +382,37 @@ def _create_start_router(
         locale = locale_cache.get(user_id) or config.default_locale
         keyboard = build_main_menu_keyboard(domain_rows=domain_rows, locale=locale)
         carrier = config.welcome_text if config.welcome_text is not None else _START_CARRIER_TEXT
+        if not single_message_start:
+            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+            await deliver_start_card(message, user_id)
+            return
+        rendered = None if render_start_result is None else await render_start_result(message, user_id)
+        if (
+            isinstance(rendered, ChassisScreen)
+            and rendered.markup is None
+            and not config.enable_language_switch
+        ):
+            await message.answer(rendered.text, reply_markup=keyboard, parse_mode=rendered.parse_mode)
+            return
+        if isinstance(rendered, ChassisScreen) and (
+            rendered.markup is not None or config.enable_language_switch
+        ):
+            logger.warning("Single-message start не объединяет Inline-карточку с Reply-клавиатурой")
+            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+            if deliver_start_result is not None:
+                await deliver_start_result(message, user_id, rendered)
+            return
+        if isinstance(rendered, Message):
+            logger.warning("Single-message start не редактирует уже отправленное сообщение кузова")
+            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+            screens.remember_card(user_id, rendered.chat.id, rendered.message_id)
+            return
+        if not config.enable_language_switch:
+            await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
+            return
         await message.answer(carrier, reply_markup=keyboard, parse_mode="HTML")
-        await deliver_start_card(message, user_id)
+        if deliver_start_result is not None:
+            await deliver_start_result(message, user_id, rendered)
 
     return router
 

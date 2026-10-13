@@ -110,6 +110,11 @@ class TestGate12FactoryContract(unittest.TestCase):
             param = signature.parameters[name]
             self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY, name)
             self.assertIsNone(param.default, name)
+        start_mode = signature.parameters["single_message_start"]
+        self.assertEqual(start_mode.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(start_mode.default, False)
+        self.assertEqual(list(signature.parameters)[-1], "single_message_start")
+        self.assertNotIn("single_message_start", NEW_NONE_KWONLY)
 
     def test_canon_updates_include_membership(self) -> None:
         self.assertEqual(

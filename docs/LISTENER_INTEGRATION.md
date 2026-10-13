@@ -231,6 +231,7 @@ async def before_chassis_menu_action(user_id: int) -> None:
 `await chassis.screens.retire_active_screen(bot, user_id)`. Метод снимает
 кнопки последней карточки рамы и не заменяет `before_chassis_menu_action`.
 Этот паспорт не означает, что репозиторий Listener уже переведён.
+`single_message_start` по умолчанию `False`: `/start` по-прежнему шлёт носитель Reply-клавиатуры и отдельную карточку. `True` склеивает только простой экран без Inline и без языка. Listener этим паспортом не переключается.
 
 ---
 

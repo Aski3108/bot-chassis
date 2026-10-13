@@ -1,7 +1,9 @@
-"""Gate P1 и P2: отмена инвойса и однострочные слоты кабинета."""
+"""Gate P1–P3: отмена инвойса, слоты кабинета и single-message /start."""
 
 from __future__ import annotations
 
+import os
+import tempfile
 import time
 import unittest
 from unittest.mock import AsyncMock
@@ -10,9 +12,21 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import DeleteMessage, TelegramMethod
-from aiogram.types import CallbackQuery, Chat, InaccessibleMessage, Message, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InaccessibleMessage,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardMarkup,
+    Update,
+    User,
+)
 
 from bot_chassis.config import BotChassisConfig, SkuItem
+from bot_chassis.factory import create_complete_chassis
+from bot_chassis.localization import ChassisScreen
 from bot_chassis.payments import CB_PAY_CANCEL, create_payments_router
 from bot_chassis.payments.service import send_sku_invoice
 from bot_chassis.ports.cabinet import CabinetSlot, build_cabinet_renderer
@@ -208,3 +222,183 @@ async def _press_cancel(
         )
     finally:
         await bot.session.close()
+
+
+_START_CASES = (
+    "legacy_false",
+    "no_callback",
+    "plain_screen",
+    "inline_screen",
+    "language_toggle",
+    "returned_message",
+    "none_without_language",
+    "none_with_language",
+    "unsupported_result",
+)
+
+
+class _StartSession(BaseSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests: list[TelegramMethod] = []
+
+    async def close(self) -> None:
+        return None
+
+    async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None):
+        self.requests.append(method)
+        if method.__class__.__name__ == "SendMessage":
+            return Message(
+                message_id=len(self.requests),
+                date=int(time.time()),
+                chat=Chat(id=getattr(method, "chat_id", 7), type="private"),
+                text=getattr(method, "text", "") or "",
+            )
+        return True
+
+    async def stream_content(self, url: str, headers: dict | None = None, timeout: int = 30, chunk_size: int = 65536):
+        yield b""
+
+
+def _kind(markup: object) -> str:
+    if isinstance(markup, ReplyKeyboardMarkup):
+        return "reply"
+    if isinstance(markup, InlineKeyboardMarkup):
+        return "inline"
+    return "none"
+
+
+class TestSingleMessageStart(unittest.IsolatedAsyncioTestCase):
+    async def test_single_message_start_branch_matrix(self) -> None:
+        for case_id in _START_CASES:
+            with self.subTest(case_id=case_id):
+                await self._run_case(case_id)
+
+    async def _run_case(self, case_id: str) -> None:
+        calls: list[int] = []
+        inline = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Go", callback_data="go")]]
+        )
+
+        async def callback(context):
+            calls.append(1)
+            if case_id == "returned_message":
+                return await context.message.answer("OWN")
+            if case_id in {"none_without_language", "none_with_language"}:
+                return None
+            if case_id == "unsupported_result":
+                return object()
+            if case_id == "inline_screen":
+                return ChassisScreen(text="BODY", markup=inline)
+            return ChassisScreen(text="BODY")
+
+        single = case_id != "legacy_false"
+        language = case_id in {"language_toggle", "none_with_language"}
+        tmp = tempfile.TemporaryDirectory()
+        session = _StartSession()
+        bot = Bot(token="123456:ABC", session=session)
+        try:
+            config = BotChassisConfig(
+                bot_id="bot_a",
+                db_path=os.path.join(tmp.name, "chassis.db"),
+                enable_admin=False,
+                enable_payments=False,
+                enable_language_switch=language,
+            )
+            chassis = await create_complete_chassis(
+                bot,
+                config,
+                render_start_callback=None if case_id == "no_callback" else callback,
+                single_message_start=single,
+            )
+            await _feed_start(chassis, bot, 1)
+            sends = [item for item in session.requests if item.__class__.__name__ == "SendMessage"]
+            edits = [item for item in session.requests if item.__class__.__name__.startswith("Edit")]
+            kinds = [_kind(getattr(item, "reply_markup", None)) for item in sends]
+            self.assertNotIn("inline+reply", kinds)
+            self.assertTrue(all(kind in {"reply", "inline", "none"} for kind in kinds))
+            for item in sends:
+                markup = getattr(item, "reply_markup", None)
+                self.assertFalse(
+                    isinstance(markup, ReplyKeyboardMarkup) and isinstance(markup, InlineKeyboardMarkup)
+                )
+            if case_id == "legacy_false":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["Главное меню", "BODY"])
+                self.assertEqual(kinds, ["reply", "none"])
+                self.assertEqual(chassis.screens.get_card(7)[1], 2)
+            elif case_id == "no_callback":
+                self.assertEqual(calls, [])
+                self.assertEqual([item.text for item in sends], ["Главное меню"])
+                self.assertEqual(kinds, ["reply"])
+                self.assertIsNone(chassis.screens.get_card(7))
+            elif case_id == "plain_screen":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["BODY"])
+                self.assertEqual(kinds, ["reply"])
+                self.assertIsNone(chassis.screens.get_card(7))
+            elif case_id == "inline_screen":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["Главное меню", "BODY"])
+                self.assertEqual(kinds, ["reply", "inline"])
+                card_id = chassis.screens.get_card(7)[1]
+                self.assertEqual(card_id, 2)
+                await _feed_start(chassis, bot, 2)
+                self.assertEqual(calls, [1, 1])
+                deleted = [
+                    item.message_id
+                    for item in session.requests
+                    if item.__class__.__name__ == "DeleteMessage"
+                ]
+                self.assertIn(card_id, deleted)
+            elif case_id == "language_toggle":
+                self.assertEqual(calls, [1])
+                self.assertEqual(kinds[0], "reply")
+                self.assertEqual(sends[0].text, "Главное меню")
+                self.assertEqual(kinds[1], "inline")
+                self.assertEqual(sends[1].text, "BODY")
+                self.assertEqual(chassis.screens.get_card(7)[1], 2)
+            elif case_id == "returned_message":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["OWN", "Главное меню"])
+                self.assertEqual(kinds, ["none", "reply"])
+                self.assertEqual(edits, [])
+                self.assertEqual(chassis.screens.get_card(7)[1], 1)
+            elif case_id == "none_without_language":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["Главное меню"])
+                self.assertEqual(kinds, ["reply"])
+                self.assertIsNone(chassis.screens.get_card(7))
+            elif case_id == "none_with_language":
+                self.assertEqual(calls, [1])
+                self.assertEqual(sends[0].text, "Главное меню")
+                self.assertEqual(kinds[0], "reply")
+                self.assertIn("Главное меню / Main menu", sends[1].text)
+                self.assertEqual(kinds[1], "inline")
+                self.assertEqual(chassis.screens.get_card(7)[1], 2)
+            elif case_id == "unsupported_result":
+                self.assertEqual(calls, [1])
+                self.assertEqual([item.text for item in sends], ["Главное меню"])
+                self.assertEqual(kinds, ["reply"])
+                self.assertIsNone(chassis.screens.get_card(7))
+            self.assertTrue(all(kind != "both" for kind in kinds))
+        finally:
+            await bot.session.close()
+            tmp.cleanup()
+
+
+async def _feed_start(chassis, bot: Bot, update_id: int) -> None:
+    user = User(id=7, is_bot=False, first_name="Ann")
+    await chassis.dp.feed_update(
+        bot,
+        Update(
+            update_id=update_id,
+            message=Message(
+                message_id=update_id,
+                date=1,
+                chat=Chat(id=7, type="private"),
+                from_user=user,
+                text="/start",
+            ),
+        ),
+    )

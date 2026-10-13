@@ -200,6 +200,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `backup_policy` | `None` | Ночной ZIP в каталог, claim сети, ротация 14/8. `None` — без планировщика, ручной `/backup` как раньше |
 | `reporting_policy` | `None` | Вечерний отчёт рамы в 23:30 UTC+5 в events (ошибка доставки — в ops). `None` — без отчётов |
 | `process_control` | `None` | Внешний `ProcessControlPort`. `None` — кнопки рестарта нет. Адаптер и имена процессов живут в кузове |
+| `single_message_start` | `False` | Последний keyword-only аргумент. `False` оставляет два сообщения `/start`. `True` склеивает только простой `ChassisScreen` без Inline и без переключателя языка с Reply-клавиатурой и не пишет его в tracker. Inline, язык и уже отправленный `Message` остаются отдельными сообщениями |
 
 `voucher_consumer` — единственная чистая заглушка-колбэк: без него оплата валидна, кузов просто не узнаёт о выдаче, пока сам не прочитает `chassis.vouchers`.
 
