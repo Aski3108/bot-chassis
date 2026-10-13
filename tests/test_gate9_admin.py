@@ -141,7 +141,11 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         await self._callback(14, CB_GO_STATS, 2)
         stats = self._named("EditMessageText")[0]
         self.assertIn("Статистика", stats.text)
-        self.assertIn("Бан:", stats.text)
+        self.assertIn("Баны:", stats.text)
+        self.assertIn("Открытые обращения:", stats.text)
+        self.assertNotIn("Планировщик", stats.text)
+        self.assertNotIn("XTR", stats.text)
+        self.assertNotIn("опущен", stats.text)
         nav = [(button.text, button.callback_data) for row in stats.reply_markup.inline_keyboard for button in row]
         self.assertEqual(nav, [("« Назад", CB_HOME)])
 

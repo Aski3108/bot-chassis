@@ -8,7 +8,7 @@ import os
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
 from aiogram import F, Router
@@ -30,6 +30,7 @@ from ..user_lifecycle import STATUS_LABELS
 from ..ports.admin_extra import ExtraAdminActions
 from ..storage.backup import write_manual_snapshot
 from ..storage import Storage
+from ..storage.engine import parse_utc
 from .audit import send_admin_audit
 from .broadcast import is_awaiting_broadcast_text, register_broadcast
 from .lookup import (
@@ -612,7 +613,7 @@ def create_admin_router(
             bot_id,
             user.id,
             text,
-            back_only_keyboard(callback_data=CB_HOME),
+            back_only_keyboard(),
         )
         await call.answer()
 
@@ -826,21 +827,22 @@ async def _home(
 
 
 def _stats_text(dash: dict) -> str:
-    return "\n".join(
-        [
-            "📊 <b>Статистика</b>",
-            f"Пользователи: {dash['total']}",
-            f"Бан: {dash['banned']}",
-            f"Active (этот бот): {dash['active']}",
-            f"Новые сегодня: {dash['new_today']}",
-            f"Открытые обращения: {dash['open_tickets']}",
-            f"Платежи Stars сегодня: {dash['stars_today']}",
-            f"Оплаты всего: {dash['paid_sum']} XTR",
-            f"Подарки: {dash['gifts']}",
-            f"Последний бэкап: {html.escape(dash['last_backup'])}",
-            f"Планировщик: {html.escape(dash['scheduler'])}",
-            "Рубильник: " + ("🔴 опущен" if dash['maintenance_on'] else "🟢 снят"),
-        ]
+    return (
+        "📊 <b>Статистика</b>\n"
+        "\n"
+        f"Пользователи: <b>{dash['total']}</b>\n"
+        f"Новые сегодня: <b>{dash['new_today']}</b>\n"
+        f"Активные за 7 дней: <b>{dash['active_7_days']}</b>\n"
+        f"Баны: <b>{dash['sanctioned_total']}</b> "
+        f"(из них Shadow: <b>{dash['shadow_banned']}</b>)\n"
+        "\n"
+        f"Платежи Stars: сегодня <b>{dash['stars_today']} ⭐</b> · "
+        f"всего <b>{dash['stars_total']} ⭐</b>\n"
+        f"Gift-подписки: <b>{dash['gifts']}</b>\n"
+        f"Открытые обращения: <b>{dash['open_tickets']}</b>\n"
+        "\n"
+        f"Последний бэкап: {dash['last_backup_label']}\n"
+        f"Рубильник: {dash['maintenance_label']}"
     )
 
 
@@ -1343,28 +1345,24 @@ async def _dashboard(
     backup_policy: BackupPolicy | None = None,
     reporting_policy: ReportingPolicy | None = None,
 ) -> dict:
+    now_utc = datetime.now(timezone.utc)
     midnight = datetime.now(UTC_PLUS_5).replace(hour=0, minute=0, second=0, microsecond=0)
     today_start = midnight.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    active_since = (now_utc - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     last_backup = await storage.scheduled_jobs.latest_done(bot_id, BACKUP_JOB_KEY)
-    last_backup_label = "—"
+    last_backup_raw = "—"
     if last_backup is not None:
         stamp = last_backup.get("completed_at") or last_backup.get("scheduled_for") or ""
         name = last_backup.get("details") or ""
-        last_backup_label = f"{stamp} {name}".strip() or "—"
+        last_backup_raw = f"{stamp} {name}".strip() or "—"
 
     def _op(conn) -> dict:
         users = conn.execute(
             """
             SELECT COUNT(*) AS total,
-                   COALESCE(SUM(CASE WHEN is_banned = 1 THEN 1 ELSE 0 END), 0) AS banned
+                   COALESCE(SUM(CASE WHEN is_banned = 1 OR is_shadow_banned = 1 THEN 1 ELSE 0 END), 0) AS sanctioned_total,
+                   COALESCE(SUM(CASE WHEN is_shadow_banned = 1 THEN 1 ELSE 0 END), 0) AS shadow_banned
             FROM users WHERE bot_id = ?
-            """,
-            (bot_id,),
-        ).fetchone()
-        paid = conn.execute(
-            """
-            SELECT COALESCE(SUM(amount), 0) AS paid_sum
-            FROM transactions WHERE bot_id = ? AND status = 'paid'
             """,
             (bot_id,),
         ).fetchone()
@@ -1387,6 +1385,13 @@ async def _dashboard(
             """,
             (bot_id, telegram_bot_id),
         ).fetchone()
+        active_7_days = conn.execute(
+            """
+            SELECT COUNT(DISTINCT user_id) AS n FROM user_bot_statuses
+            WHERE bot_id = ? AND telegram_bot_id = ? AND last_seen_at >= ?
+            """,
+            (bot_id, telegram_bot_id, active_since),
+        ).fetchone()
         new_today = conn.execute(
             """
             SELECT COUNT(*) AS n FROM users
@@ -1406,30 +1411,53 @@ async def _dashboard(
             """
             SELECT COALESCE(SUM(amount), 0) AS stars
             FROM transactions
-            WHERE bot_id = ? AND provider = 'telegram_stars' AND status = 'paid'
-              AND created_at >= ?
+            WHERE bot_id = ? AND provider = 'telegram_stars'
+              AND currency = 'XTR' AND status = 'paid' AND created_at >= ?
             """,
             (bot_id, today_start),
+        ).fetchone()
+        stars_total = conn.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0) AS stars
+            FROM transactions
+            WHERE bot_id = ? AND provider = 'telegram_stars'
+              AND currency = 'XTR' AND status = 'paid'
+            """,
+            (bot_id,),
         ).fetchone()
         maintenance_on = bool(settings["is_maintenance"]) if settings else False
         reason = settings["maintenance_reason"] if settings else None
         return {
             "total": int(users["total"]),
-            "banned": int(users["banned"]),
-            "paid_sum": int(paid["paid_sum"]),
+            "sanctioned_total": int(users["sanctioned_total"]),
+            "shadow_banned": int(users["shadow_banned"]),
             "gifts": int(gifts["n"]),
             "maintenance_on": maintenance_on,
+            "maintenance_label": "🔴 включён" if maintenance_on else "🟢 снят",
             "reason": reason,
             "active": int(active["n"]),
+            "active_7_days": int(active_7_days["n"]),
             "new_today": int(new_today["n"]),
             "open_tickets": int(open_tickets["n"]),
             "stars_today": int(stars_today["stars"]),
+            "stars_total": int(stars_total["stars"]),
         }
 
     data = await storage.engine.run(_op)
-    data["last_backup"] = last_backup_label
+    data["last_backup"] = last_backup_raw
+    data["last_backup_label"] = _format_last_backup(last_backup)
     data["scheduler"] = _scheduler_label(backup_policy, reporting_policy)
     return data
+
+
+def _format_last_backup(row: dict | None) -> str:
+    if row is None:
+        return "нет"
+    stamp = row.get("completed_at") or row.get("scheduled_for") or ""
+    if not stamp:
+        return "нет"
+    local = parse_utc(stamp).astimezone(UTC_PLUS_5)
+    return local.strftime("%Y-%m-%d %H:%M (UTC+5)")
 
 
 def _scheduler_label(

@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from aiogram import Bot, Dispatcher
@@ -48,7 +49,7 @@ from bot_chassis.admin.screens import (
     CB_GO_STATS,
 )
 from bot_chassis.config import BotChassisConfig
-from bot_chassis.policies import BackupPolicy
+from bot_chassis.policies import BACKUP_JOB_KEY, BackupPolicy
 from bot_chassis.ports.process_control import ProcessOperationResult, ProcessTarget
 from bot_chassis.storage import create_storage
 
@@ -440,6 +441,252 @@ class TestAdminV2A0(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self._named("SendDocument")), 1)
         self.assertFalse(self._named("EditMessageText"))
         self.assertFalse(any("Админка" in (item.text or "") for item in self._named("SendMessage")))
+
+
+_FROZEN_UTC = datetime(2026, 10, 13, 12, 0, 0, tzinfo=timezone.utc)
+_TODAY_START = "2026-10-12 19:00:00"
+_SEEN_EDGE = "2026-10-06 12:00:00"
+_SEEN_BEFORE_EDGE = "2026-10-06 11:59:59"
+
+
+class _FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return _FROZEN_UTC.replace(tzinfo=None)
+        return _FROZEN_UTC.astimezone(tz)
+
+
+class TestAdminV2A6(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self._tmp.name, "admin.db")
+        self.config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=self.db_path,
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+        )
+        self.storage = await create_storage(self.config)
+        reset_broadcast_sessions()
+        reset_admin_lookups()
+        reset_process_intents()
+        _SECURITY_ALERT_THROTTLE.clear()
+        await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
+        self.session = _Session()
+        self.bot = Bot(token="123456:ABC", session=self.session)
+        self.telegram_bot_id = int(self.bot.id)
+        self.dp = Dispatcher()
+        self.dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+
+        def _age(conn) -> None:
+            conn.execute(
+                "UPDATE users SET created_at = '2020-01-01 00:00:00' WHERE bot_id = 'bot_a'"
+            )
+
+        await self.storage.engine.run(_age)
+
+    async def asyncTearDown(self) -> None:
+        _SECURITY_ALERT_THROTTLE.clear()
+        await self.bot.session.close()
+        self._tmp.cleanup()
+
+    def _named(self, name: str):
+        return [item for item in self.session.requests if item.__class__.__name__ == name]
+
+    async def _callback(self, user_id: int, data: str, update_id: int) -> None:
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=user_id, type="private"),
+            from_user=_user(user_id),
+            text="admin",
+        )
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                callback_query=CallbackQuery(
+                    id=str(update_id),
+                    from_user=_user(user_id),
+                    chat_instance="x",
+                    data=data,
+                    message=panel,
+                ),
+            ),
+        )
+
+    async def _stats(self, update_id: int = 1) -> str:
+        with patch("bot_chassis.admin.router.datetime", _FrozenDateTime):
+            await self._callback(14, CB_GO_STATS, update_id)
+        return self._named("EditMessageText")[-1].text
+
+    async def _seen(self, user_id: int, telegram_bot_id: int, last_seen: str) -> None:
+        await self.storage.users.upsert_user("bot_a", user_id)
+
+        def _op(conn) -> None:
+            conn.execute(
+                """
+                INSERT INTO user_bot_statuses (
+                    bot_id, user_id, origin_bot_id, telegram_bot_id, status,
+                    first_seen_at, last_seen_at, status_changed_at
+                ) VALUES ('bot_a', ?, 'bot_a', ?, 'active', ?, ?, ?)
+                """,
+                (user_id, telegram_bot_id, last_seen, last_seen, last_seen),
+            )
+
+        await self.storage.engine.run(_op)
+
+    async def _pay(
+        self,
+        user_id: int,
+        payment_id: str,
+        amount: int,
+        created_at: str,
+        *,
+        provider: str = "telegram_stars",
+        currency: str = "XTR",
+        bot_id: str = "bot_a",
+    ) -> None:
+        await self.storage.users.upsert_user(bot_id, user_id)
+        await self.storage.transactions.record_successful_payment(
+            bot_id,
+            user_id,
+            "vip",
+            amount,
+            payment_id,
+            provider=provider,
+            currency=currency,
+            payment_id=payment_id,
+        )
+
+        def _op(conn) -> None:
+            conn.execute(
+                "UPDATE transactions SET created_at = ? WHERE bot_id = ? AND payment_id = ?",
+                (created_at, bot_id, payment_id),
+            )
+
+        await self.storage.engine.run(_op)
+
+    async def test_dashboard_uses_current_bot_last_seen_for_active_7_days(self) -> None:
+        await self._seen(201, self.telegram_bot_id, _SEEN_EDGE)
+        await self._seen(202, self.telegram_bot_id, _SEEN_BEFORE_EDGE)
+        await self._seen(203, 999, "2026-10-13 12:00:00")
+        await self._seen(204, self.telegram_bot_id, "2026-10-13 12:00:00")
+        await self._seen(205, self.telegram_bot_id, "2026-10-01 00:00:00")
+        await self.storage.users.set_ban("bot_a", 205, True, "stale")
+        text = await self._stats()
+        self.assertIn("Активные за 7 дней: <b>2</b>", text)
+        self.assertNotIn("updated_at", text)
+
+    async def test_dashboard_counts_user_with_full_and_shadow_once_in_total(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 301)
+        await self.storage.users.set_ban("bot_a", 301, True, "both")
+        await self.storage.users.set_shadow_ban("bot_a", 301, True)
+        await self.storage.users.upsert_user("bot_a", 302)
+        await self.storage.users.set_ban("bot_a", 302, True, "full")
+        await self.storage.users.upsert_user("bot_a", 303)
+        await self.storage.users.set_shadow_ban("bot_a", 303, True)
+        await self.storage.users.upsert_user("bot_a", 304)
+        text = await self._stats()
+        self.assertIn("Пользователи: <b>6</b>", text)
+        self.assertIn("Баны: <b>3</b> (из них Shadow: <b>2</b>)", text)
+
+    async def test_dashboard_stars_exclude_non_xtr_and_refunded(self) -> None:
+        await self._pay(15, "xtr-today", 10, _TODAY_START)
+        await self._pay(15, "xtr-yesterday", 20, "2026-10-12 18:59:59")
+        await self._pay(15, "rub-today", 100, _TODAY_START, provider="yookassa", currency="RUB")
+        await self._pay(15, "usdt-today", 50, _TODAY_START, provider="cryptobot", currency="USDT")
+        await self._pay(15, "xtr-refunded", 7, _TODAY_START)
+        await self.storage.transactions.mark_refunded("bot_a", "xtr-refunded")
+        await self._pay(15, "xtr-other-bot", 99, _TODAY_START, bot_id="bot_b")
+        text = await self._stats()
+        self.assertIn("Платежи Stars: сегодня <b>10 ⭐</b> · всего <b>30 ⭐</b>", text)
+        self.assertNotIn("XTR", text)
+
+    async def test_dashboard_formats_backup_and_maintenance_exactly(self) -> None:
+        text = await self._stats(1)
+        self.assertIn("Последний бэкап: нет", text)
+        self.assertIn("Рубильник: 🟢 снят", text)
+        self.assertNotIn("опущен", text)
+
+        def _job(conn) -> None:
+            conn.execute(
+                """
+                INSERT INTO scheduled_job_runs (
+                    bot_id, job_key, scheduled_for, completed_at, status, details
+                ) VALUES ('bot_a', ?, '2026-10-12 23:00:00', '2026-10-12 23:15:00', 'done', 'nightly.zip')
+                """,
+                (BACKUP_JOB_KEY,),
+            )
+
+        await self.storage.engine.run(_job)
+        await self.storage.bot_settings.set_maintenance_status(
+            "bot_a", True, reason="pause", updated_by=100
+        )
+        self.session.requests.clear()
+        text = await self._stats(2)
+        self.assertIn("Последний бэкап: 2026-10-13 04:15 (UTC+5)", text)
+        self.assertIn("Рубильник: 🔴 включён", text)
+        self.assertNotIn("nightly.zip", text)
+        self.assertNotIn("опущен", text)
+
+    async def test_dashboard_exact_html_and_one_back_button(self) -> None:
+        await self.storage.users.upsert_user("bot_a", 401)
+
+        def _today(conn) -> None:
+            conn.execute(
+                "UPDATE users SET created_at = ? WHERE bot_id = 'bot_a' AND user_id = 401",
+                (_TODAY_START,),
+            )
+
+        await self.storage.engine.run(_today)
+        await self._seen(401, self.telegram_bot_id, _SEEN_EDGE)
+        await self.storage.users.upsert_user("bot_a", 402)
+
+        def _keep_old(conn) -> None:
+            conn.execute(
+                "UPDATE users SET created_at = '2020-01-01 00:00:00' WHERE bot_id = 'bot_a' AND user_id = 402"
+            )
+
+        await self.storage.engine.run(_keep_old)
+        await self.storage.users.set_ban("bot_a", 402, True, "full")
+        await self.storage.users.set_shadow_ban("bot_a", 402, True)
+        await self._seen(402, 999, "2026-10-13 12:00:00")
+        await self.storage.subscriptions.grant_gift_access("bot_a", 401, granted_by=100)
+
+        def _expired(conn) -> None:
+            conn.execute(
+                """
+                INSERT INTO subscriptions (
+                    bot_id, user_id, plan_code, is_lifetime, expires_at,
+                    granted_by, status
+                ) VALUES ('bot_a', 402, 'old', 0, '2020-01-01 00:00:00', 100, 'active')
+                """
+            )
+
+        await self.storage.engine.run(_expired)
+        with patch("bot_chassis.admin.router.datetime", _FrozenDateTime):
+            await self._callback(14, CB_GO_STATS, 1)
+        screen = self._named("EditMessageText")[-1]
+        self.assertEqual(
+            screen.text,
+            "📊 <b>Статистика</b>\n"
+            "\n"
+            "Пользователи: <b>4</b>\n"
+            "Новые сегодня: <b>1</b>\n"
+            "Активные за 7 дней: <b>1</b>\n"
+            "Баны: <b>1</b> (из них Shadow: <b>1</b>)\n"
+            "\n"
+            "Платежи Stars: сегодня <b>0 ⭐</b> · всего <b>0 ⭐</b>\n"
+            "Gift-подписки: <b>1</b>\n"
+            "Открытые обращения: <b>0</b>\n"
+            "\n"
+            "Последний бэкап: нет\n"
+            "Рубильник: 🟢 снят",
+        )
+        self.assertFalse(screen.text.endswith("\n"))
+        self.assertEqual(_rows(screen.reply_markup), [("« Назад", CB_HOME)])
 
 
 if __name__ == "__main__":
