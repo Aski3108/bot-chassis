@@ -64,6 +64,7 @@ def register_broadcast(
     root: Filter,
     raise_home=None,
     require_root_call,
+    pending_store,
 ) -> None:
     @router.callback_query(F.data == CB_BROADCAST, staff)
     async def start_broadcast(call: CallbackQuery) -> None:
@@ -77,7 +78,7 @@ def register_broadcast(
             return
         from .lookup import cancel_admin_lookup
 
-        cancel_admin_lookup(bot_id, actor.id)
+        cancel_admin_lookup(bot_id, actor.id, pending_store)
         _BROADCAST_SESSIONS[key] = BroadcastSession(phase="awaiting")
         await _strip_markup(call)
         await call.bot.send_message(actor.id, BROADCAST_PROMPT)

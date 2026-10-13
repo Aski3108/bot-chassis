@@ -15,7 +15,6 @@ from aiogram.methods import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from bot_chassis.admin.broadcast import reset_broadcast_sessions
-from bot_chassis.admin.lookup import reset_admin_lookups
 from bot_chassis.admin.process import (
     CB_RST_ALL,
     RESTART_AUDIT_FAILED,
@@ -144,7 +143,6 @@ class TestGate10ProcessControl(unittest.IsolatedAsyncioTestCase):
         self.storage = await create_storage(self.config)
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
         reset_broadcast_sessions()
-        reset_admin_lookups()
         reset_process_intents()
         self.session = _Session()
         self.bot = Bot(token="123456:ABC", session=self.session)

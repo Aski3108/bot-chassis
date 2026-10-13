@@ -26,6 +26,7 @@ class UserRecord:
     is_shadow_banned: bool = False
     telegram_language_code: Optional[str] = None
     locale_source: str = "legacy"
+    shadow_ban_reason: Optional[str] = None
 
 
 def _row_to_user(row) -> UserRecord:
@@ -44,6 +45,7 @@ def _row_to_user(row) -> UserRecord:
         is_shadow_banned=bool(row["is_shadow_banned"]),
         telegram_language_code=row["telegram_language_code"] if "telegram_language_code" in row.keys() else None,
         locale_source=row["locale_source"] if "locale_source" in row.keys() else "legacy",
+        shadow_ban_reason=row["shadow_ban_reason"] if "shadow_ban_reason" in row.keys() else None,
     )
 
 
@@ -208,6 +210,7 @@ class UsersRepository:
         bot_id: str,
         user_id: int,
         is_shadow_banned: bool,
+        reason: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
         def _op(conn) -> tuple[bool, Optional[str]]:
             exists = conn.execute(
@@ -221,10 +224,16 @@ class UsersRepository:
             conn.execute(
                 """
                 UPDATE users
-                SET is_shadow_banned = ?, updated_at = ?
+                SET is_shadow_banned = ?, shadow_ban_reason = ?, updated_at = ?
                 WHERE bot_id = ? AND user_id = ?
                 """,
-                (1 if is_shadow_banned else 0, utc_now(), bot_id, user_id),
+                (
+                    1 if is_shadow_banned else 0,
+                    reason if is_shadow_banned else None,
+                    utc_now(),
+                    bot_id,
+                    user_id,
+                ),
             )
             return True, None
 

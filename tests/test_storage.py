@@ -519,6 +519,7 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         user_cols, tx_cols, index, tx, unique_indexes = await engine.run(_inspect)
         self.assertIn("traffic_source", user_cols)
         self.assertIn("is_shadow_banned", user_cols)
+        self.assertIn("shadow_ban_reason", user_cols)
         self.assertIsNotNone(index)
         self.assertIn("payment_id", tx_cols)
         self.assertEqual(tx_cols["amount"].upper(), "INTEGER")
@@ -536,6 +537,7 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         user = await UsersRepository(engine).get_user("bot_a", 7)
         self.assertEqual(user.language_code, "en")
         self.assertFalse(user.is_shadow_banned)
+        self.assertIsNone(user.shadow_ban_reason)
         self.assertIsNone(user.traffic_source)
         self.assertTrue(user.created_at)
 
@@ -551,6 +553,37 @@ class TestStorageContour(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.payment_id, "chg-old")
         self.assertEqual(record.merchant_origin_bot_id, "bot_a")
         self.assertEqual(record.merchant_telegram_bot_id, 0)
+
+    async def test_shadow_reason_migrates_old_database(self) -> None:
+        path = os.path.join(self._tmp.name, "shadow-reason.db")
+        conn = sqlite3.connect(path)
+        try:
+            conn.executescript(_STAGE1_DDL)
+            conn.execute(
+                "INSERT INTO users (bot_id, user_id, language_code) VALUES ('bot_a', 7, 'ru')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        engine = StorageEngine(path)
+        await engine.initialize()
+        users = UsersRepository(engine)
+
+        def _columns(conn):
+            return {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+
+        self.assertIn("shadow_ban_reason", await engine.run(_columns))
+        ok, err = await users.set_shadow_ban("bot_a", 7, True, "тихо")
+        self.assertTrue(ok, err)
+        profile = await users.get_user("bot_a", 7)
+        self.assertTrue(profile.is_shadow_banned)
+        self.assertEqual(profile.shadow_ban_reason, "тихо")
+        ok, err = await users.set_shadow_ban("bot_a", 7, False)
+        self.assertTrue(ok, err)
+        cleared = await users.get_user("bot_a", 7)
+        self.assertFalse(cleared.is_shadow_banned)
+        self.assertIsNone(cleared.shadow_ban_reason)
 
     async def test_clean_and_concurrent_initialize_are_idempotent(self) -> None:
         path = os.path.join(self._tmp.name, "concurrent.db")

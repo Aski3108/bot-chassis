@@ -29,7 +29,6 @@ from bot_chassis.admin.broadcast import (
     CB_BROADCAST_STOP,
     reset_broadcast_sessions,
 )
-from bot_chassis.admin.lookup import reset_admin_lookups
 from bot_chassis.admin.filters import AdminRoleFilter, SuperadminRoleFilter, _user_id
 from bot_chassis.admin.router import (
     ALREADY_GRANTED,
@@ -219,7 +218,6 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         reset_broadcast_sessions()
-        reset_admin_lookups()
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
         await self.storage.users.upsert_user("bot_a", 15)
         await self.storage.users.set_ban("bot_a", 15, True, "spam")
@@ -671,9 +669,15 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
 
         self.session.requests.clear()
         await self._feed_callback(14, "adm_usr:sanction:ban:16", 7, panel)
-        self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertIn("Блокировка пользователя @a&lt;b&gt;", self._named("EditMessageText")[0].text)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.session.requests.clear()
+        await self._feed_text(14, "спам", 71)
+        banned = await self.storage.users.get_user("bot_a", 16)
+        self.assertTrue(banned.is_banned)
+        self.assertEqual(banned.ban_reason, "спам")
         self.assertIn("Заблокирован", self._named("EditMessageText")[0].text)
-        self.assertIn(("🟢 Снять бан", "adm_usr:sanction:unban:16"), [
+        self.assertIn(("🔴 Санкции (Бан)", "adm_usr:menu:sanctions:16"), [
             (button.text, button.callback_data)
             for row in self._named("EditMessageText")[0].reply_markup.inline_keyboard
             for button in row
@@ -682,14 +686,18 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
 
         self.session.requests.clear()
         await self._feed_callback(14, "adm_usr:sanction:ban:100", 8, panel)
+        self.session.requests.clear()
+        await self._feed_text(14, "нет", 81)
         self.assertFalse((await self.storage.users.get_user("bot_a", 100)).is_banned)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, LAST_SUPERADMIN)
+        self.assertIn(LAST_SUPERADMIN, [item.text for item in self._named("SendMessage") if item.chat_id == 14])
         self.assertFalse(self._named("EditMessageText"))
 
         self.session.requests.clear()
         await self._feed_callback(14, "adm_usr:sanction:shadow_on:14", 9, panel)
+        self.session.requests.clear()
+        await self._feed_text(14, "тихо", 91)
         self.assertFalse((await self.storage.users.get_user("bot_a", 14)).is_shadow_banned)
-        self.assertEqual(self._named("AnswerCallbackQuery")[0].text, TARGET_IS_ADMIN)
+        self.assertIn(TARGET_IS_ADMIN, [item.text for item in self._named("SendMessage") if item.chat_id == 14])
 
         self.session.requests.clear()
         await self._feed_callback(100, "adm_usr:addvouch:16", 10, panel)
@@ -984,7 +992,15 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
     async def test_broadcast_preview_delivery_and_stop(self) -> None:
         self.assertEqual(
             {item.value for item in PendingInputKind},
-            {"support_message", "support_reply", "review", "review_consent", "custom_input", "admin_lookup"},
+            {
+                "support_message",
+                "support_reply",
+                "review",
+                "review_consent",
+                "custom_input",
+                "admin_lookup",
+                "admin_ban_reason",
+            },
         )
         await self.storage.users.upsert_user("bot_a", 16)
         await self.storage.users.set_shadow_ban("bot_a", 16, True)

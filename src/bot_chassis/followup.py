@@ -20,6 +20,11 @@ class PendingScope(str, Enum):
     DOMAIN = "domain"
 
 
+class AdminSanctionKind(str, Enum):
+    BAN = "ban"
+    SHADOW_BAN = "shadow_ban"
+
+
 class PendingInputKind(str, Enum):
     """Типы ожидаемого пользовательского ввода."""
     SUPPORT_MESSAGE = "support_message"
@@ -28,6 +33,7 @@ class PendingInputKind(str, Enum):
     REVIEW_CONSENT = "review_consent"
     CUSTOM_INPUT = "custom_input"
     ADMIN_LOOKUP = "admin_lookup"
+    ADMIN_BAN_REASON = "admin_ban_reason"
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,6 +45,7 @@ class PendingInput:
     origin_message_id: Optional[int] = None
     created_at: float = field(default_factory=time.time)
     ticket_id: Optional[str] = None
+    sanction_kind: AdminSanctionKind | None = None
 
 
 class PendingInputStore:

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
@@ -22,13 +23,19 @@ from bot_chassis.admin.broadcast import (
     is_awaiting_broadcast_text,
     reset_broadcast_sessions,
 )
-from bot_chassis.admin.lookup import reset_admin_lookups
 from bot_chassis.admin.process import (
     CB_RST_ALL,
     CB_RST_NO,
     CB_RST_PREFIX_OK,
     CB_RST_PREFIX_ONE,
     reset_process_intents,
+)
+from bot_chassis.followup import (
+    AdminSanctionKind,
+    PendingInput,
+    PendingInputKind,
+    PendingInputStore,
+    PendingScope,
 )
 from bot_chassis.admin.router import (
     CB_BROADCAST,
@@ -143,7 +150,6 @@ class TestAdminV2A0(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         reset_broadcast_sessions()
-        reset_admin_lookups()
         reset_process_intents()
         _SECURITY_ALERT_THROTTLE.clear()
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
@@ -472,7 +478,6 @@ class TestAdminV2A6(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         reset_broadcast_sessions()
-        reset_admin_lookups()
         reset_process_intents()
         _SECURITY_ALERT_THROTTLE.clear()
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
@@ -987,16 +992,17 @@ class TestAdminV2A1(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        await click("adm_usr:sanction:ban:16", 1)
+        await self.storage.users.set_ban("bot_a", 16, True, "seed")
+        await click("adm_usr:sanction:unban:16", 1)
         await click("adm_usr:menu:dossier:16", 2)
         edits = [item for item in session.requests if item.__class__.__name__ == "EditMessageText"]
         self.assertEqual(len(edits), 2)
-        self.assertIn("Статус: 🔴 Заблокирован", edits[0].text)
-        self.assertIn("Статус: 🔴 Заблокирован", edits[1].text)
+        self.assertIn("Статус: 🟢 Активен", edits[0].text)
+        self.assertIn("Статус: 🟢 Активен", edits[1].text)
         self.assertTrue(edits[0].text.endswith("Extra hours: 16"))
-        self.assertEqual(_rows(edits[0].reply_markup)[0], ("🟢 Снять бан", "adm_usr:sanction:unban:16"))
+        self.assertEqual(_rows(edits[0].reply_markup)[0], ("🔴 Выдать бан", "adm_usr:sanction:ban:16"))
         self.assertEqual(_rows(edits[1].reply_markup)[-3], ("Grant hours", "adm_ops:grant_hours:16"))
-        self.assertTrue((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
         homes = [
             item
             for item in session.requests
@@ -1056,6 +1062,21 @@ class TestAdminV2A2(unittest.IsolatedAsyncioTestCase):
     def _edits(self):
         return [item for item in self.session.requests if item.__class__.__name__ == "EditMessageText"]
 
+    async def _text(self, user_id: int, text: str, update_id: int) -> None:
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                message=Message(
+                    message_id=update_id,
+                    date=1,
+                    chat=Chat(id=user_id, type="private"),
+                    from_user=_user(user_id),
+                    text=text,
+                ),
+            ),
+        )
+
     async def _flags(self, user_id: int, *, banned: bool = False, shadow: bool = False) -> None:
         await self.storage.users.upsert_user("bot_a", user_id, username=f"u{user_id}")
 
@@ -1075,12 +1096,12 @@ class TestAdminV2A2(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_parse_sanction_callback("adm_usr:sanction:unban:16"), ("unban", 16))
         self.assertEqual(_parse_sanction_callback("adm_usr:sanction:shadow_on:16"), ("shadow_on", 16))
         self.assertEqual(_parse_sanction_callback("adm_usr:sanction:shadow_off:16"), ("shadow_off", 16))
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:no_reason:16"), ("no_reason", 16))
+        self.assertEqual(_parse_sanction_callback("adm_usr:sanction:cancel:16"), ("cancel", 16))
         for raw in (
             "adm_usr:sanction:ban",
             "adm_usr:sanction:ban:16:1",
             "adm_usr:sanction:toggle:16",
-            "adm_usr:sanction:no_reason:16",
-            "adm_usr:sanction:cancel:16",
             "adm_usr:ban:16",
             "adm_usr:shban:16",
             "adm_usr:sanction:ban:abc",
@@ -1155,24 +1176,226 @@ class TestAdminV2A2(unittest.IsolatedAsyncioTestCase):
     async def test_sanction_error_does_not_render_success(self) -> None:
         await self.storage.users.upsert_user("bot_a", 16, username="neo")
         await self._click(14, "adm_usr:sanction:ban:100", 1)
+        self.session.requests.clear()
+        await self._text(14, "нет", 11)
         self.assertFalse((await self.storage.users.get_user("bot_a", 100)).is_banned)
-        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
-        self.assertEqual(answers[-1].text, "Нельзя забанить последнего суперадмина")
-        self.assertTrue(answers[-1].show_alert)
+        sent = [item.text for item in self.session.requests if item.__class__.__name__ == "SendMessage"]
+        self.assertIn("Нельзя забанить последнего суперадмина", sent)
         self.assertFalse(self._edits())
 
         self.session.requests.clear()
         await self._click(100, "adm_usr:sanction:shadow_on:14", 2)
+        self.session.requests.clear()
+        await self._text(100, "тихо", 12)
         self.assertFalse((await self.storage.users.get_user("bot_a", 14)).is_shadow_banned)
-        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
-        self.assertEqual(answers[-1].text, "Нельзя наложить тень на admin или superadmin")
-        self.assertTrue(answers[-1].show_alert)
+        sent = [item.text for item in self.session.requests if item.__class__.__name__ == "SendMessage"]
+        self.assertIn("Нельзя наложить тень на admin или superadmin", sent)
         self.assertFalse(self._edits())
 
         self.session.requests.clear()
         await self._click(14, "adm_usr:sanction:no_reason:16", 3)
         self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
+        self.assertEqual(answers[-1].text, "Действие устарело")
         self.assertFalse(self._edits())
+
+
+class _FailingEditSession(_Session):
+    def __init__(self, fail_on_edit: int, message: str) -> None:
+        super().__init__()
+        self.fail_on_edit = fail_on_edit
+        self.fail_message = message
+        self.edits = 0
+
+    async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None):
+        if method.__class__.__name__ == "EditMessageText":
+            self.edits += 1
+            if self.edits == self.fail_on_edit:
+                raise TelegramBadRequest(method=method, message=self.fail_message)
+        return await super().make_request(bot, method, timeout)
+
+
+class TestAdminV2A3(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = BotChassisConfig(
+            bot_id="bot_a",
+            db_path=os.path.join(self._tmp.name, "admin.db"),
+            superadmin_ids=(100,),
+            audit_chat_id=-100,
+        )
+        self.storage = await create_storage(self.config)
+        await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
+        await self.storage.users.upsert_user("bot_a", 16, username="neo")
+        self.store = PendingInputStore()
+        self.session = _Session()
+        self.bot = Bot(token="123456:ABC", session=self.session)
+        self.dp = Dispatcher()
+        self.dp.include_router(
+            create_admin_router("bot_a", self.storage, self.config, pending_store=self.store)
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.bot.session.close()
+        self._tmp.cleanup()
+
+    async def _click(self, user_id: int, data: str, update_id: int, *, message_id: int = 50) -> None:
+        panel = Message(
+            message_id=message_id,
+            date=1,
+            chat=Chat(id=user_id, type="private"),
+            from_user=_user(user_id),
+            text="dossier",
+        )
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                callback_query=CallbackQuery(
+                    id=str(update_id),
+                    from_user=_user(user_id),
+                    chat_instance="x",
+                    data=data,
+                    message=panel,
+                ),
+            ),
+        )
+
+    async def _text(self, user_id: int, text: str, update_id: int) -> None:
+        await self.dp.feed_update(
+            self.bot,
+            Update(
+                update_id=update_id,
+                message=Message(
+                    message_id=update_id,
+                    date=1,
+                    chat=Chat(id=user_id, type="private"),
+                    from_user=_user(user_id),
+                    text=text,
+                ),
+            ),
+        )
+
+    def _edits(self):
+        return [item for item in self.session.requests if item.__class__.__name__ == "EditMessageText"]
+
+    async def test_admin_sanction_pending_keeps_target_kind_and_origin(self) -> None:
+        self.store.set(
+            14,
+            PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE),
+            scope=PendingScope.USER,
+        )
+        await self._click(14, "adm_usr:sanction:ban:16", 1, message_id=77)
+        pending = self.store.get(14, scope=PendingScope.ADMIN)
+        self.assertEqual(pending.kind, PendingInputKind.ADMIN_BAN_REASON)
+        self.assertEqual(pending.sanction_kind, AdminSanctionKind.BAN)
+        self.assertEqual(pending.target_user_id, 16)
+        self.assertEqual(pending.origin_chat_id, 14)
+        self.assertEqual(pending.origin_message_id, 77)
+        self.assertEqual(self.store.get(14, scope=PendingScope.USER).kind, PendingInputKind.SUPPORT_MESSAGE)
+        prompt = self._edits()[0]
+        self.assertEqual(prompt.text, (
+            "⚠️ <b>Блокировка пользователя @neo</b> (ID: <code>16</code>)\n"
+            "\n"
+            "Отправьте в чат причину блокировки:\n"
+            "(или выберите блокировку без указания причины)"
+        ))
+        self.assertEqual(
+            _rows(prompt.reply_markup),
+            [
+                ("⚡️ Заблокировать без причины", "adm_usr:sanction:no_reason:16"),
+                ("❌ Отмена", "adm_usr:sanction:cancel:16"),
+            ],
+        )
+
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:shadow_on:16", 2, message_id=78)
+        pending = self.store.get(14, scope=PendingScope.ADMIN)
+        self.assertEqual(pending.sanction_kind, AdminSanctionKind.SHADOW_BAN)
+        self.assertEqual(pending.origin_message_id, 78)
+        self.assertIn("Теневой бан пользователя @neo", self._edits()[0].text)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_shadow_banned)
+
+    async def test_admin_reason_command_is_not_consumed(self) -> None:
+        await self._click(14, "adm_usr:sanction:ban:16", 1)
+        self.session.requests.clear()
+        await self._text(14, "/admin", 2)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertIsNone(self.store.get(14, scope=PendingScope.ADMIN))
+        homes = [item for item in self.session.requests if item.__class__.__name__ == "SendMessage" and "Админка" in (item.text or "")]
+        self.assertTrue(homes)
+
+    async def test_admin_reason_double_delivery_mutates_once(self) -> None:
+        await self._click(14, "adm_usr:sanction:ban:16", 1)
+        await self._text(14, "   ", 2)
+        self.assertIsNotNone(self.store.get(14, PendingInputKind.ADMIN_BAN_REASON, scope=PendingScope.ADMIN))
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        await self._text(14, "первая причина", 3)
+        await self._text(14, "вторая причина", 4)
+        profile = await self.storage.users.get_user("bot_a", 16)
+        self.assertTrue(profile.is_banned)
+        self.assertEqual(profile.ban_reason, "первая причина")
+        self.assertIsNone(self.store.get(14, scope=PendingScope.ADMIN))
+
+    async def test_admin_reason_returns_exact_base_dossier_keyboard(self) -> None:
+        await self._click(14, "adm_usr:sanction:shadow_on:16", 1)
+        self.session.requests.clear()
+        await self._text(14, "тихо", 2)
+        profile = await self.storage.users.get_user("bot_a", 16)
+        self.assertTrue(profile.is_shadow_banned)
+        self.assertEqual(profile.shadow_ban_reason, "тихо")
+        self.assertFalse(profile.is_banned)
+        edit = self._edits()[0]
+        self.assertEqual(edit.message_id, 50)
+        self.assertEqual(
+            _rows(edit.reply_markup),
+            [
+                ("🔴 Санкции (Бан)", "adm_usr:menu:sanctions:16"),
+                ("« Назад", "adm_back"),
+                ("В главное меню", "adm_home"),
+            ],
+        )
+        self.assertNotIn("Снять теневой бан", " ".join(label for label, _data in _rows(edit.reply_markup)))
+
+    async def test_admin_no_reason_and_cancel_validate_target(self) -> None:
+        await self._click(14, "adm_usr:sanction:ban:16", 1)
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:no_reason:99", 2)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertEqual(self.store.get(14, scope=PendingScope.ADMIN).target_user_id, 16)
+        answers = [item for item in self.session.requests if item.__class__.__name__ == "AnswerCallbackQuery"]
+        self.assertEqual(answers[-1].text, "Это ожидание для другого пользователя")
+        self.assertFalse(self._edits())
+
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:cancel:16", 3)
+        self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
+        self.assertIsNone(self.store.get(14, scope=PendingScope.ADMIN))
+        self.assertEqual(_rows(self._edits()[0].reply_markup)[0][1], "adm_usr:menu:sanctions:16")
+
+        await self._click(14, "adm_usr:sanction:shadow_on:16", 4)
+        self.session.requests.clear()
+        await self._click(14, "adm_usr:sanction:no_reason:16", 5)
+        profile = await self.storage.users.get_user("bot_a", 16)
+        self.assertTrue(profile.is_shadow_banned)
+        self.assertEqual(profile.shadow_ban_reason, "Не указана")
+        self.assertIsNone(self.store.get(14, scope=PendingScope.ADMIN))
+        self.assertEqual(_rows(self._edits()[0].reply_markup)[0][1], "adm_usr:menu:sanctions:16")
+
+    async def test_lookup_and_sanction_share_one_pending_store(self) -> None:
+        other = PendingInputStore()
+        other.set(14, PendingInput(kind=PendingInputKind.ADMIN_LOOKUP), scope=PendingScope.ADMIN)
+        self.store.set(14, PendingInput(kind=PendingInputKind.ADMIN_LOOKUP), scope=PendingScope.ADMIN)
+        self.store.set(14, PendingInput(kind=PendingInputKind.SUPPORT_MESSAGE), scope=PendingScope.USER)
+        await self._click(14, "adm_usr:sanction:ban:16", 1)
+        self.assertIsNone(self.store.get(14, PendingInputKind.ADMIN_LOOKUP, scope=PendingScope.ADMIN))
+        self.assertEqual(
+            self.store.get(14, scope=PendingScope.ADMIN).kind,
+            PendingInputKind.ADMIN_BAN_REASON,
+        )
+        self.assertEqual(self.store.get(14, scope=PendingScope.USER).kind, PendingInputKind.SUPPORT_MESSAGE)
+        self.assertEqual(other.get(14, scope=PendingScope.ADMIN).kind, PendingInputKind.ADMIN_LOOKUP)
 
 
 if __name__ == "__main__":

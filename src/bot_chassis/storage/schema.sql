@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_banned INTEGER NOT NULL DEFAULT 0,
     ban_reason TEXT,
     is_shadow_banned INTEGER NOT NULL DEFAULT 0, -- 1 = тихий сброс спамера (подтверждено архитектором)
+    shadow_ban_reason TEXT,
     consent_at TEXT,                         -- ISO-8601 отметка 152-ФЗ; сбор согласия — в кузове
     traffic_source TEXT,                     -- UTM/реферальный хвост из /start <payload>; first-touch (не перезаписывается)
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

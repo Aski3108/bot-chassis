@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    InaccessibleMessage,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -24,6 +25,13 @@ from aiogram.types import (
 from aiogram.types import BufferedInputFile, FSInputFile
 from loguru import logger
 
+from ..followup import (
+    AdminSanctionKind,
+    PendingInput,
+    PendingInputKind,
+    PendingInputStore,
+    PendingScope,
+)
 from ..config import BotChassisConfig, resolved_origin
 from ..policies import BACKUP_JOB_KEY, UTC_PLUS_5, BackupPolicy, ReportingPolicy
 from ..ports.admin_extra import ExtraAdminActions
@@ -35,6 +43,9 @@ from .broadcast import is_awaiting_broadcast_text, register_broadcast
 from .lookup import (
     FIND_CANCELLED,
     FIND_PROMPT,
+    SANCTION_STALE,
+    SANCTION_TARGET_MISMATCH,
+    AwaitingAdminBanReason,
     AwaitingAdminLookup,
     begin_admin_lookup,
     cancel_admin_lookup,
@@ -127,6 +138,7 @@ def create_admin_router(
     process_control=None,
 ) -> Router:
     router = Router(name="admin")
+    resolved_pending_store = pending_store or PendingInputStore()
     staff = AdminRoleFilter(bot_id, storage.roles)
     root = SuperadminRoleFilter(bot_id, storage.roles)
     panels = screens or AdminScreenTracker()
@@ -169,6 +181,7 @@ def create_admin_router(
         user = message.from_user
         if user is None or await _is_banned(storage, bot_id, user.id):
             return
+        resolved_pending_store.clear(user.id, scope=PendingScope.ADMIN)
         text, markup = await _home_bundle(user.id, int(message.bot.id))
         await panels.send_panel(message.bot, bot_id, user.id, text, markup)
 
@@ -185,8 +198,7 @@ def create_admin_router(
         if target_id is None:
             return
         reason = " ".join(args[1:]).strip() or None
-        if reason and len(reason) > 500:
-            reason = reason[:497] + "..."
+        reason = _clip_reason(reason) if reason else None
         ok, err = await storage.users.set_ban(bot_id, target_id, True, reason)
         if not ok:
             await _reply(message, _ban_error(err))
@@ -412,6 +424,8 @@ def create_admin_router(
             await call.answer()
             return
         kind, target_id = parsed
+        if kind == "dossier":
+            resolved_pending_store.clear(user.id, scope=PendingScope.ADMIN)
         await _open_user_screen(call, user.id, target_id, sanctions=kind == "sanctions")
 
     @router.callback_query(F.data.startswith("adm_usr:sanction:"), staff)
@@ -425,8 +439,14 @@ def create_admin_router(
             await call.answer()
             return
         action, target_id = parsed
+        if action in {"no_reason", "cancel"}:
+            await _close_sanction_reason(call, user.id, target_id, action)
+            return
         if await storage.users.get_user(bot_id, target_id) is None:
             await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        if action in {"ban", "shadow_on"}:
+            await _begin_sanction_reason(call, user.id, target_id, action)
             return
         error = await _apply_sanction(call, storage, config, bot_id, action, target_id)
         if error:
@@ -437,6 +457,82 @@ def create_admin_router(
             await call.answer(USER_NOT_FOUND, show_alert=True)
             return
         await call.answer()
+
+    async def _begin_sanction_reason(call, actor_id: int, target_id: int, action: str) -> None:
+        message = call.message
+        if message is None or isinstance(message, InaccessibleMessage):
+            await call.answer("Сообщение недоступно", show_alert=True)
+            return
+        profile = await storage.users.get_user(bot_id, target_id)
+        if profile is None:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        kind = AdminSanctionKind.BAN if action == "ban" else AdminSanctionKind.SHADOW_BAN
+        resolved_pending_store.set(
+            actor_id,
+            PendingInput(
+                kind=PendingInputKind.ADMIN_BAN_REASON,
+                target_user_id=target_id,
+                origin_chat_id=message.chat.id,
+                origin_message_id=message.message_id,
+                sanction_kind=kind,
+            ),
+            scope=PendingScope.ADMIN,
+        )
+        await panels.edit_or_send(
+            call,
+            bot_id,
+            actor_id,
+            _sanction_prompt(profile, kind),
+            _sanction_reason_keyboard(target_id),
+        )
+        await call.answer()
+
+    async def _close_sanction_reason(call, actor_id: int, target_id: int, action: str) -> None:
+        pending = resolved_pending_store.get(
+            actor_id,
+            PendingInputKind.ADMIN_BAN_REASON,
+            scope=PendingScope.ADMIN,
+        )
+        if pending is None or pending.sanction_kind is None:
+            await call.answer(SANCTION_STALE, show_alert=True)
+            return
+        if pending.target_user_id != target_id:
+            await call.answer(SANCTION_TARGET_MISMATCH, show_alert=True)
+            return
+        resolved_pending_store.clear(actor_id, scope=PendingScope.ADMIN)
+        if action == "no_reason":
+            error = await _apply_named_sanction(call, pending.sanction_kind, target_id, "Не указана")
+            if error:
+                await call.answer(error, show_alert=True)
+                return
+        shown = await _show_dossier_call(call, actor_id, target_id, keyboard_mode="legacy")
+        if not shown:
+            await call.answer(USER_NOT_FOUND, show_alert=True)
+            return
+        await call.answer()
+
+    async def _apply_named_sanction(source, kind: AdminSanctionKind, target_id: int, reason: str) -> str | None:
+        actor_id = source.from_user.id
+        if kind is AdminSanctionKind.BAN:
+            ok, err = await storage.users.set_ban(bot_id, target_id, True, reason)
+            if not ok:
+                return _ban_error(err)
+            await send_admin_audit(
+                source.bot,
+                config,
+                f"Бан user_id={target_id}. Причина: {reason}. actor={actor_id}",
+            )
+            return None
+        ok, err = await storage.users.set_shadow_ban(bot_id, target_id, True, reason)
+        if not ok:
+            return _shadow_error(err)
+        await send_admin_audit(
+            source.bot,
+            config,
+            f"Теневой бан включён user_id={target_id}. Причина: {reason}. actor={actor_id}",
+        )
+        return None
 
     async def _show_dossier_call(call, actor_id: int, target_id: int, *, keyboard_mode: str = "legacy") -> bool:
         if keyboard_mode != "legacy":
@@ -671,6 +767,7 @@ def create_admin_router(
         user = await _require_staff_call(call)
         if user is None:
             return
+        resolved_pending_store.clear(user.id, scope=PendingScope.ADMIN)
         await _show_home_call(call, user.id)
         await call.answer()
 
@@ -806,7 +903,7 @@ def create_admin_router(
         if is_awaiting_broadcast_text(bot_id, actor.id):
             await call.answer("Сначала завершите рассылку", show_alert=True)
             return
-        begin_admin_lookup(bot_id, actor.id, pending_store)
+        begin_admin_lookup(bot_id, actor.id, resolved_pending_store)
         await panels.edit_or_send(
             call,
             bot_id,
@@ -816,7 +913,7 @@ def create_admin_router(
         )
         await call.answer()
 
-    @router.message(AwaitingAdminLookup(bot_id, pending_store), F.chat.type == ChatType.PRIVATE, staff)
+    @router.message(AwaitingAdminLookup(bot_id, resolved_pending_store), F.chat.type == ChatType.PRIVATE, staff)
     async def capture_user_lookup(message: Message) -> None:
         actor = await _actor(message, storage, bot_id)
         if actor is None:
@@ -824,13 +921,13 @@ def create_admin_router(
         text = (message.text or "").strip()
         command = text.split(maxsplit=1)[0].split("@", 1)[0] if text.startswith("/") else ""
         if command == "/cancel":
-            cancel_admin_lookup(bot_id, actor.id, pending_store)
+            cancel_admin_lookup(bot_id, actor.id, resolved_pending_store)
             await _reply(message, FIND_CANCELLED)
             return
         if not text:
             await _reply(message, FIND_PROMPT)
             return
-        cancel_admin_lookup(bot_id, actor.id, pending_store)
+        cancel_admin_lookup(bot_id, actor.id, resolved_pending_store)
         target_id = await _target_from_token(message, storage, bot_id, text, USER_NOT_FOUND)
         if target_id is None:
             return
@@ -850,6 +947,56 @@ def create_admin_router(
         dossier_text, markup = card
         await panels.send_panel(message.bot, bot_id, actor.id, dossier_text, markup)
 
+    @router.message(AwaitingAdminBanReason(resolved_pending_store), F.chat.type == ChatType.PRIVATE, staff)
+    async def capture_ban_reason(message: Message) -> None:
+        actor = await _actor(message, storage, bot_id)
+        if actor is None:
+            return
+        reason = (message.text or "").strip()
+        if not reason:
+            pending = resolved_pending_store.get(
+                actor.id,
+                PendingInputKind.ADMIN_BAN_REASON,
+                scope=PendingScope.ADMIN,
+            )
+            hint = "Отправьте в чат причину блокировки:\n(или выберите блокировку без указания причины)"
+            if pending is not None and pending.sanction_kind is AdminSanctionKind.SHADOW_BAN:
+                hint = "Отправьте в чат причину теневого бана:\n(или выберите блокировку без указания причины)"
+            await _reply(message, hint)
+            return
+        pending = resolved_pending_store.clear(actor.id, scope=PendingScope.ADMIN)
+        if (
+            pending is None
+            or pending.kind is not PendingInputKind.ADMIN_BAN_REASON
+            or pending.sanction_kind is None
+            or pending.target_user_id is None
+        ):
+            return
+        error = await _apply_named_sanction(
+            message,
+            pending.sanction_kind,
+            pending.target_user_id,
+            _clip_reason(reason),
+        )
+        if error:
+            await _reply(message, error)
+            return
+        card = await _dossier(
+            storage,
+            bot_id,
+            pending.target_user_id,
+            extra_user_dossier_lines=extra_user_dossier_lines,
+            extra_user_dossier_rows=extra_user_dossier_rows,
+            bot_display_name_provider=bot_display_name_provider,
+            telegram_bot_id=int(message.bot.id),
+            is_root=await _actor_is_root(actor.id),
+        )
+        if card is None:
+            await _reply(message, USER_NOT_FOUND)
+            return
+        text, markup = card
+        await panels.edit_tracked_or_send(message.bot, bot_id, actor.id, text, markup)
+
     register_broadcast(
         router,
         bot_id,
@@ -859,6 +1006,7 @@ def create_admin_router(
         root=root,
         raise_home=_raise_home,
         require_root_call=_require_root_call,
+        pending_store=resolved_pending_store,
     )
     return router
 
@@ -969,6 +1117,53 @@ def _parse_user_callback(data: str) -> tuple[str, int] | None:
     return action, int(target)
 
 
+def _clip_reason(reason: str) -> str:
+    if len(reason) > 500:
+        return reason[:497] + "..."
+    return reason
+
+
+_BAN_REASON_PROMPT = """⚠️ <b>Блокировка пользователя {identity}</b> (ID: <code>{user_id}</code>)
+
+Отправьте в чат причину блокировки:
+(или выберите блокировку без указания причины)"""
+
+_SHADOW_REASON_PROMPT = """⚠️ <b>Теневой бан пользователя {identity}</b> (ID: <code>{user_id}</code>)
+
+Отправьте в чат причину теневого бана:
+(или выберите блокировку без указания причины)"""
+
+
+def _sanction_identity(user) -> str:
+    if user.username:
+        return f"@{html.escape(user.username)}"
+    return "без username"
+
+
+def _sanction_prompt(user, kind: AdminSanctionKind) -> str:
+    template = _BAN_REASON_PROMPT if kind is AdminSanctionKind.BAN else _SHADOW_REASON_PROMPT
+    return template.format(identity=_sanction_identity(user), user_id=user.user_id)
+
+
+def _sanction_reason_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⚡️ Заблокировать без причины",
+                    callback_data=f"adm_usr:sanction:no_reason:{user_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=f"adm_usr:sanction:cancel:{user_id}",
+                )
+            ],
+        ]
+    )
+
+
 def _parse_menu_callback(data: str) -> tuple[str, int] | None:
     parts = data.split(":")
     if len(parts) != 4 or parts[0] != "adm_usr" or parts[1] != "menu":
@@ -982,7 +1177,7 @@ def _parse_sanction_callback(data: str) -> tuple[str, int] | None:
     parts = data.split(":")
     if len(parts) != 4 or parts[0] != "adm_usr" or parts[1] != "sanction":
         return None
-    if parts[2] not in {"ban", "unban", "shadow_on", "shadow_off"} or not parts[3].isdigit():
+    if parts[2] not in {"ban", "unban", "shadow_on", "shadow_off", "no_reason", "cancel"} or not parts[3].isdigit():
         return None
     return parts[2], int(parts[3])
 

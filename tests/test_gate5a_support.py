@@ -12,12 +12,12 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
-from bot_chassis.admin.lookup import admin_lookup_is_waiting, reset_admin_lookups
+from bot_chassis.admin.lookup import admin_lookup_is_waiting
 from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.admin.router import CB_FIND
 from bot_chassis.contracts import BTN_SUPPORT_RU
 from bot_chassis.factory import create_complete_chassis
-from bot_chassis.followup import PendingInput, PendingInputKind, PendingScope
+from bot_chassis.followup import PendingInput, PendingInputKind, PendingInputStore, PendingScope
 from bot_chassis.localization import ChassisScreen
 
 
@@ -55,12 +55,10 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
         self.db_path = os.path.join(self._tmp.name, "support.db")
         self.session = _Session()
         self.bot = Bot(token="123456:ABC", session=self.session)
-        reset_admin_lookups()
 
     async def asyncTearDown(self) -> None:
         await self.bot.session.close()
         self._tmp.cleanup()
-        reset_admin_lookups()
 
     def _texts(self) -> list[str]:
         return [
@@ -232,7 +230,7 @@ class TestSupportScreens(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             chassis.pending_store.is_active(14, PendingInputKind.ADMIN_LOOKUP, scope=PendingScope.ADMIN)
         )
-        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14, PendingInputStore()))
 
         await self._message(chassis, 14, "/support", 2)
         self.assertTrue(chassis.pending_store.is_active(14, PendingInputKind.SUPPORT_MESSAGE))

@@ -24,20 +24,21 @@
 `.agents/OPS_SIDECAR_CONCEPT.md`; в `0.3.1` он не входит.
 
 Release 2.0 идёт по `.agents/UPGRADE_2_0_PLAN_AUDIT.md`. S4-A/B/C, P1–P3,
-A0, A6 и A1 закоммичены. A1 — `c9c3ff2`. B3 прошёл с PASS. A2 лежит в рабочем
-дереве и не закоммичен: подменю санкций и явное снятие бана и тени.
+A0, A6, A1 и A2 закоммичены. A2 — `5dfc3c1`. B3 прошёл с PASS. A3 лежит в
+рабочем дереве и не закоммичен: причина бана и тени через один
+`PendingInputStore`, колонка `shadow_ban_reason`.
 Версия пакета остаётся `0.3.1`. Целевая `2.0.0` выставляется только в Gate R2.
 
 ## Проверка
 
-- `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.py -q` → **56 passed**;
-- `py -m pytest tests -q` → **288 passed** после A2;
+- `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.py -q` → **62 passed**;
+- `py -m pytest tests -q` → **295 passed** после A3;
 - `py -m pytest tests/test_chassis.py -q` → **19 passed**;
 - `py -m compileall -q src tests` и `git diff --check` → чисто.
 
 ## Следующее действие
 
-1. A2 в рабочем дереве. Коммит и следующий Gate A3 — только по отдельной команде владельца.
+1. A3 в рабочем дереве. Коммит и следующий Gate A4 — только по отдельной команде владельца.
 2. Не push и не запускать live Telegram smoke без отдельной команды.
 3. Gate 13, payment-delivery queue и Ops Sidecar не смешивать с Release 2.0.
 

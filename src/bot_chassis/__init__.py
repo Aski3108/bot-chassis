@@ -50,6 +50,7 @@ from .dispatcher import (
     ActiveTaskTracker,
 )
 from .followup import (
+    AdminSanctionKind,
     PendingInput,
     PendingInputKind,
     PendingInputStore,
@@ -105,6 +106,7 @@ __all__ = [
     "close_screen",
     "edit_or_send",
     "ActiveTaskTracker",
+    "AdminSanctionKind",
     "PendingInput",
     "PendingInputKind",
     "PendingInputStore",

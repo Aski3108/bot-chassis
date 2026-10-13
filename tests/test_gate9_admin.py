@@ -12,7 +12,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
-from bot_chassis.admin.lookup import FIND_PROMPT, reset_admin_lookups
+from bot_chassis.admin.lookup import FIND_PROMPT
 from bot_chassis.admin.broadcast import reset_broadcast_sessions
 from bot_chassis.admin.router import CB_EXPORT, CB_FIND, CB_HOME, create_admin_router
 from bot_chassis.admin.screens import (
@@ -69,7 +69,6 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         reset_broadcast_sessions()
-        reset_admin_lookups()
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
         await self.storage.users.upsert_user("bot_a", 15)
         self.session = _Session()

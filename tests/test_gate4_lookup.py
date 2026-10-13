@@ -18,7 +18,6 @@ from bot_chassis.admin.lookup import (
     admin_lookup_is_waiting,
     begin_admin_lookup,
     cancel_admin_lookup,
-    reset_admin_lookups,
 )
 from bot_chassis.admin.broadcast import (
     is_awaiting_broadcast_text,
@@ -70,17 +69,18 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         )
         self.storage = await create_storage(self.config)
         await self.storage.roles.grant_role("bot_a", 14, "admin", granted_by=100)
-        reset_admin_lookups()
         reset_broadcast_sessions()
+        self.pending = PendingInputStore()
         self.session = _Session()
         self.bot = Bot(token="123456:ABC", session=self.session)
         self.dp = Dispatcher()
-        self.dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+        self.dp.include_router(
+            create_admin_router("bot_a", self.storage, self.config, pending_store=self.pending)
+        )
 
     async def asyncTearDown(self) -> None:
         await self.bot.session.close()
         self._tmp.cleanup()
-        reset_admin_lookups()
         reset_broadcast_sessions()
 
     def _texts(self, chat_id: int) -> list[str]:
@@ -178,13 +178,13 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
             if item.__class__.__name__ == "EditMessageText"
         ]
         self.assertTrue(any(FIND_PROMPT in (text or "") for text in combined))
-        self.assertTrue(admin_lookup_is_waiting("bot_a", 14))
+        self.assertTrue(admin_lookup_is_waiting("bot_a", 14, self.pending))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
 
         self.session.requests.clear()
         await self._text(14, "/cancel", 2)
         self.assertIn(FIND_CANCELLED, self._texts(14))
-        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14, self.pending))
         self.assertIsNotNone(pending.get(14))
 
         await self._callback(14, CB_FIND, 3)
@@ -192,19 +192,21 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         await self._text(14, "@neo", 4)
         dossier = self._texts(14)
         self.assertTrue(any("ID: <code>16</code>" in text for text in dossier))
-        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14, self.pending))
         self.assertEqual(pending.get(14).kind, PendingInputKind.SUPPORT_MESSAGE)
 
     async def test_lookup_and_broadcast_waits_are_scoped_by_bot(self) -> None:
-        begin_admin_lookup("bot_a", 14)
-        self.assertTrue(admin_lookup_is_waiting("bot_a", 14))
-        self.assertFalse(admin_lookup_is_waiting("bot_b", 14))
+        store_a = PendingInputStore()
+        store_b = PendingInputStore()
+        begin_admin_lookup("bot_a", 14, store_a)
+        self.assertTrue(admin_lookup_is_waiting("bot_a", 14, store_a))
+        self.assertFalse(admin_lookup_is_waiting("bot_b", 14, store_b))
 
-        begin_admin_lookup("bot_b", 14)
-        cancel_admin_lookup("bot_a", 14)
-        self.assertFalse(admin_lookup_is_waiting("bot_a", 14))
-        self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
-        cancel_admin_lookup("bot_b", 14)
+        begin_admin_lookup("bot_b", 14, store_b)
+        cancel_admin_lookup("bot_a", 14, store_a)
+        self.assertFalse(admin_lookup_is_waiting("bot_a", 14, store_a))
+        self.assertTrue(admin_lookup_is_waiting("bot_b", 14, store_b))
+        cancel_admin_lookup("bot_b", 14, store_b)
 
         await self._callback(100, CB_BROADCAST, 10)
         self.assertTrue(is_awaiting_broadcast_text("bot_a", 100))
@@ -219,7 +221,10 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
         storage_b = await create_storage(config_b)
         await storage_b.roles.grant_role("bot_b", 14, "admin", granted_by=200)
         dp_b = Dispatcher()
-        dp_b.include_router(create_admin_router("bot_b", storage_b, config_b))
+        store_find = PendingInputStore()
+        dp_b.include_router(
+            create_admin_router("bot_b", storage_b, config_b, pending_store=store_find)
+        )
         panel = Message(message_id=40, date=1, chat=Chat(id=14, type="private"), text="admin")
         await dp_b.feed_update(
             self.bot,
@@ -234,7 +239,7 @@ class TestUserLookup(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
-        self.assertTrue(admin_lookup_is_waiting("bot_b", 14))
+        self.assertTrue(admin_lookup_is_waiting("bot_b", 14, store_find))
         self.assertTrue(is_awaiting_broadcast_text("bot_a", 100))
         combined = self._texts(14) + [
             item.text

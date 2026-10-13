@@ -91,6 +91,7 @@ class StorageEngine:
                 )
                 _rebuild_transaction_payment_key_if_needed(conn)
             if _table_exists(conn, "users"):
+                _add_column_if_missing(conn, "ALTER TABLE users ADD COLUMN shadow_ban_reason TEXT")
                 _add_column_if_missing(conn, "ALTER TABLE users ADD COLUMN telegram_language_code TEXT")
                 _add_column_if_missing(
                     conn,

@@ -109,6 +109,41 @@ class AdminScreenTracker:
             logger.exception("Не удалось обновить админ-панель")
             await self.send_panel(call.bot, bot_id, actor_id, text, markup)
 
+    async def edit_tracked_or_send(
+        self,
+        bot,
+        bot_id: str,
+        actor_id: int,
+        text: str,
+        markup: InlineKeyboardMarkup,
+    ) -> None:
+        entry = self.get(bot_id, actor_id)
+        if entry is None:
+            await self.send_panel(bot, bot_id, actor_id, text, markup)
+            return
+        chat_id, message_id = entry
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            self.remember(bot_id, actor_id, chat_id, message_id)
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                self.remember(bot_id, actor_id, chat_id, message_id)
+                return
+            logger.exception("Не удалось обновить отслеживаемую админ-панель")
+            await self.send_panel(bot, bot_id, actor_id, text, markup)
+        except TelegramForbiddenError:
+            logger.exception("Не удалось обновить отслеживаемую админ-панель")
+            await self.send_panel(bot, bot_id, actor_id, text, markup)
+        except Exception:
+            logger.exception("Не удалось обновить отслеживаемую админ-панель")
+            await self.send_panel(bot, bot_id, actor_id, text, markup)
+
     async def freeze_as_report(
         self,
         call: CallbackQuery,
