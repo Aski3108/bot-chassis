@@ -9,7 +9,7 @@
 Прочитать по порядку:
 
 1. `.agents/NEW_CHAT.md` — этот короткий вход;
-2. `.agents/AGENTS.md` — правила control plane;
+2. `AGENTS.md` (в корне) — канонические правила проекта и control plane;
 3. `.agents/SESSION_STATE.md` — фактическое состояние;
 4. `.agents/PROJECT_CONTEXT.md` — что это за продукт;
 5. `.agents/ACTIVE_PLANS.md` — какие треки живы;
@@ -60,6 +60,7 @@ Git-тег `v0.3.0` не ставился. Tag `profiling` не двигался
 
 **Где правда:**
 
+- канонические правила: `AGENTS.md`;
 - порядок и статусы Gate: `.agents/TASK_TODO.md`;
 - технический план `0.3`: `.agents/UPGRADE_0_3_PLAN.md`;
 - единственный технический план `0.3.1`: `.agents/UPGRADE_0_3_1_PLAN.md`;

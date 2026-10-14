@@ -38,7 +38,7 @@ SPEC=.agents/ADMIN_REDESIGN_SPEC.md
 Прочитай полностью и в таком порядке:
 
 1. `.agents/NEW_CHAT.md`;
-2. `.agents/AGENTS.md`;
+2. `AGENTS.md` (в корне);
 3. `.agents/SESSION_STATE.md`;
 4. `.agents/PROJECT_CONTEXT.md`;
 5. `.agents/ACTIVE_PLANS.md`;

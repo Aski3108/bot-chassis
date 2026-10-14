@@ -10,7 +10,7 @@ The workspace root is Bot Chassis (`C:\Python\bot_chassis`). This is the frame, 
 Read in this order before planning or changing code:
 
 1. `.agents/NEW_CHAT.md`
-2. `.agents/AGENTS.md` for control-plane rules
+2. `AGENTS.md` for project and control-plane rules
 3. `.agents/SESSION_STATE.md`
 4. `.agents/PROJECT_CONTEXT.md`
 5. `.agents/ACTIVE_PLANS.md`
