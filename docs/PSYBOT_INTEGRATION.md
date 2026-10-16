@@ -157,6 +157,8 @@ Telegram API запрещает отправку `ReplyKeyboardMarkup` (пост
   - Продакшн/сервер: `/var/lib/psybot/chassis/shared_chassis.db`.
   - Локальный путь: задаётся переменной окружения `PSYBOT_CHASSIS_DB_PATH`.
 * **Режим работы:** SQLite в режиме WAL (`journal_mode = WAL`, `busy_timeout = 5000`, `foreign_keys = ON`).
+* **Ночной бэкап:** `backup_policy=None` включает штатный бэкап файловой SQLite;
+  `False` отключает его. Для `:memory:` и URI с `mode=memory` планировщик не создаётся.
 * **Права доступа Systemd:**
   - В шаблон юнита `deploy/systemd/psybot@.service` включены пути:
     ```ini

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Awaitable, Callable, Sequence
+from pathlib import Path
+from typing import Awaitable, Callable, Literal, Sequence
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram import F
@@ -28,6 +29,7 @@ from .localization import (
 )
 from .middleware import register_chassis_middlewares
 from .payments.router import create_payments_router
+from .policies import BackupPolicy
 from .ports.access import AccessPort, DefaultAccessAdapter
 from .ports.admin_extra import ExtraAdminActions
 from .ports.cabinet import CabinetSlotsProviderPort, DefaultCabinetSlotsAdapter, build_cabinet_renderer
@@ -47,6 +49,12 @@ from .user_lifecycle import register_membership_handler, warn_if_my_chat_member_
 _MENU_TEXT = "📱 <b>Главное меню</b>\n\nИспользуйте кнопки внизу экрана:"
 _START_CARRIER_TEXT = "Главное меню"
 _DEFAULT_START_CARD_TEXT = "📱 <b>Главное меню / Main menu</b>"
+
+
+def _is_persistent_sqlite(path: str | None) -> bool:
+    if not path or path == ":memory:":
+        return False
+    return not (path.startswith("file:") and "mode=memory" in path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +114,7 @@ async def create_complete_chassis(
     donation_catalog=None,
     donation_hint: str | None = None,
     review_sink=None,
-    backup_policy=None,
+    backup_policy: BackupPolicy | Literal[False] | None = None,
     reporting_policy=None,
     process_control=None,
     single_message_start: bool = False,
@@ -115,6 +123,16 @@ async def create_complete_chassis(
         storage = await create_storage(config)
     if dp is None:
         dp = Dispatcher()
+    if backup_policy is False:
+        resolved_backup_policy: BackupPolicy | None = None
+    elif backup_policy is None:
+        resolved_backup_policy = (
+            BackupPolicy(directory=str(Path(config.db_path).parent / "backups"))
+            if _is_persistent_sqlite(config.db_path)
+            else None
+        )
+    else:
+        resolved_backup_policy = backup_policy
     storage.bot_statuses.bind_process(resolved_origin(config), int(bot.id))
     warn_if_my_chat_member_missing(allowed_updates)
     register_membership_handler(dp, storage, config)
@@ -167,7 +185,7 @@ async def create_complete_chassis(
                 extra_user_dossier_rows=extra_user_dossier_rows,
                 bot_display_name_provider=bot_display_name_provider,
                 pending_store=resolved_pending,
-                backup_policy=backup_policy,
+                backup_policy=resolved_backup_policy,
                 reporting_policy=reporting_policy,
                 process_control=process_control,
             )
@@ -308,16 +326,17 @@ async def create_complete_chassis(
                 )
             )
 
-    if backup_policy is not None:
+    if resolved_backup_policy is not None:
         register_backup_scheduler(
             dp,
             BackupScheduler(
                 bot=bot,
                 config=config,
                 storage=storage,
-                policy=backup_policy,
+                policy=resolved_backup_policy,
                 origin_bot_id=resolved_origin(config),
                 telegram_bot_id=int(bot.id),
+                project_label=project_label,
             ),
         )
     if reporting_policy is not None:
@@ -331,6 +350,7 @@ async def create_complete_chassis(
                 origin_bot_id=resolved_origin(config),
                 telegram_bot_id=int(bot.id),
                 donation_sku_codes=tuple(item.sku_code for item in donation_items),
+                project_label=project_label,
             ),
         )
 

@@ -158,9 +158,9 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
 - [x] **B4.** Независимый аудит A1–A4 — **PASS** после точной коррекции
   test-scope A1. Узко 109, полно 299, frozen 19; production-scope чистый,
   `bot_gateway.py` и frozen-файл не изменены.
-- [ ] **A5.** Stateless-список пользователей по 15 записей и максимум 5 цифровых кнопок в ряду.
-- [ ] **A7.** Безопасный default backup и человекочитаемые audit/report/backup карточки.
-- [ ] **B5.** Независимый аудит A5 + A7.
+- [x] **A5.** Stateless-список пользователей по 15 записей и максимум 5 цифровых кнопок в ряду. Реализация и коррекция блокеров приняты повторным B5 с PASS 2026-10-16.
+- [x] **A7.** Безопасный default backup и человекочитаемые audit/report/backup карточки. Реализация и коррекция блокеров приняты повторным B5 с PASS 2026-10-16.
+- [x] **B5.** Независимый аудит A5 + A7 — **PASS** после коррекции блокеров; результат подтверждён владельцем 2026-10-16.
 - [ ] **R2. Обновить спецификацию и канон шасси.** После PASS B1–B5 синхронизировать `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md` и `.agents/ADMIN_REDESIGN_SPEC.md`; поднять `pyproject.toml` до `2.0.0`, добавить `CHANGELOG.md` и release-тесты. Не объявлять соседние кузова мигрированными.
 - [ ] **B6. Финальный независимый аудит Release 2.0.** Полный diff, security/data/async/migration/dead-code/docs/version проверки и полный suite; frozen — ровно 19.
 - [ ] **Release 2.0 closeout.** Только после PASS B6 записать фактические результаты в `TASK_TODO`, `ACTIVE_PLANS`, `SESSION_STATE`, `PROJECT_LOG`; `VERSION_LOG` менять только при реально принятом HEAD/tag; затем пройти B6-CLOSEOUT. Commit/tag/push/live smoke — только отдельными командами владельца.

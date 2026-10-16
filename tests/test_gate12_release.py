@@ -241,6 +241,20 @@ class TestGate12BodyContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts[0], "Главное меню")
         self.assertIn("Главное меню", texts[1])
 
+    async def test_factory_accepts_explicit_false_backup_policy(self) -> None:
+        config = BotChassisConfig(
+            bot_id="demo",
+            db_path=self.db_path,
+            enable_admin=False,
+            enable_payments=False,
+        )
+        chassis = await create_complete_chassis(
+            self.bot, config, backup_policy=False
+        )
+        await chassis.dp.emit_startup(bot=self.bot)
+        self.assertIsNone(chassis.dp.workflow_data.get("chassis_backup_task"))
+        await chassis.dp.emit_shutdown(bot=self.bot)
+
     async def test_one_start_one_info_locale_keeps_domain_donations_and_membership(self) -> None:
         starts: list[str] = []
         infos: list[int] = []

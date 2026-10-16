@@ -53,6 +53,32 @@ class UsersRepository:
     def __init__(self, engine: StorageEngine) -> None:
         self._engine = engine
 
+    async def count_users(self, bot_id: str) -> int:
+        def _op(conn) -> int:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM users WHERE bot_id = ?", (bot_id,)
+            ).fetchone()
+            return int(row["total"])
+
+        return await self._engine.run(_op)
+
+    async def list_users_page(
+        self, bot_id: str, *, limit: int, offset: int
+    ) -> list[UserRecord]:
+        def _op(conn) -> list[UserRecord]:
+            rows = conn.execute(
+                """
+                SELECT * FROM users
+                WHERE bot_id = ?
+                ORDER BY created_at DESC, user_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (bot_id, limit, offset),
+            ).fetchall()
+            return [_row_to_user(row) for row in rows]
+
+        return await self._engine.run(_op)
+
     async def upsert_user(
         self,
         bot_id: str,

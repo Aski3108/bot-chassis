@@ -8,7 +8,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
@@ -23,6 +23,8 @@ from bot_chassis.admin.broadcast import (
     is_awaiting_broadcast_text,
     reset_broadcast_sessions,
 )
+from bot_chassis.admin.audit import format_sanction_audit
+from bot_chassis.admin.lookup import FIND_PROMPT
 from bot_chassis.admin.process import (
     CB_RST_ALL,
     CB_RST_NO,
@@ -47,6 +49,9 @@ from bot_chassis.admin.router import (
     _dossier,
     _parse_sanction_callback,
     _parse_subscription_callback,
+    _parse_users_open_callback,
+    _parse_users_page_callback,
+    _users_page_card,
     _sanctions_keyboard,
     _subscription_keyboard,
     create_admin_router,
@@ -77,6 +82,7 @@ RESTART_ROW = ("🔄 Рестарт бота", CB_GO_RESTART)
 DB_ROWS = (
     ("📥 Выгрузка пользователей (.xlsx)", CB_EXPORT),
     ("💾 Бэкап базы данных (.db)", CB_DO_BACKUP),
+    ("👥 Список пользователей в Telegram", "adm_users:p:d:0"),
     ("« Назад", CB_HOME),
 )
 DB_MENU_TEXT = (
@@ -430,7 +436,7 @@ class TestAdminV2A0(unittest.IsolatedAsyncioTestCase):
         screen = self._named("EditMessageText")[0]
         self.assertEqual(screen.text, DB_MENU_TEXT)
         self.assertEqual(_rows(screen.reply_markup), list(DB_ROWS))
-        self.assertNotIn("Список пользователей", [text for text, _data in _rows(screen.reply_markup)])
+        self.assertIn("👥 Список пользователей в Telegram", [text for text, _data in _rows(screen.reply_markup)])
         self.assertNotIn("Скачать Excel", screen.text)
 
         self.session.requests.clear()
@@ -1592,6 +1598,233 @@ class TestAdminV2A4(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertFalse(homes)
         await bot.session.close()
+
+
+class TestAdminV2A5(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = BotChassisConfig(
+            bot_id="bot_a", db_path=os.path.join(self._tmp.name, "admin.db"), superadmin_ids=(100,)
+        )
+        self.storage = await create_storage(self.config)
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def test_users_page_repository_is_tenant_scoped_and_stable(self) -> None:
+        for user_id in (1, 2, 3):
+            await self.storage.users.upsert_user("bot_a", user_id)
+        await self.storage.users.upsert_user("bot_b", 99)
+
+        def same_date(conn) -> None:
+            conn.execute("UPDATE users SET created_at = '2026-10-14 00:00:00'")
+
+        await self.storage.engine.run(same_date)
+        self.assertEqual(await self.storage.users.count_users("bot_a"), 4)
+        page = await self.storage.users.list_users_page("bot_a", limit=15, offset=0)
+        self.assertEqual([user.user_id for user in page], [100, 3, 2, 1])
+
+    async def test_users_list_boundaries_0_1_15_16_31(self) -> None:
+        for count in (0, 1, 15, 16, 31):
+            bot_id = f"shape_{count}"
+            for user_id in range(1, count + 1):
+                await self.storage.users.upsert_user(bot_id, user_id)
+            self.assertEqual(await self.storage.users.count_users(bot_id), count)
+            first = await self.storage.users.list_users_page(bot_id, limit=15, offset=0)
+            second = await self.storage.users.list_users_page(bot_id, limit=15, offset=15)
+            self.assertEqual(len(first), min(count, 15))
+            self.assertEqual(len(second), max(0, min(count - 15, 15)))
+
+    async def test_users_list_has_at_most_five_number_buttons_per_row(self) -> None:
+        for user_id in range(1, 16):
+            await self.storage.users.upsert_user("bot_a", user_id, username=f"user{user_id}")
+        users = await self.storage.users.list_users_page("bot_a", limit=15, offset=0)
+        text, markup = await _users_page_card(self.storage, "bot_a", users, 31, 0, 3, "s")
+        self.assertEqual(text.splitlines()[0], "👥 <b>Пользователи базы</b> (всего: <b>31</b>) · Стр. 1/3")
+        self.assertEqual([len(row) for row in markup.inline_keyboard[:3]], [5, 5, 5])
+        self.assertEqual(
+            [(button.text, button.callback_data) for button in markup.inline_keyboard[-2]],
+            [("Вперёд ➡️", "adm_users:p:s:1")],
+        )
+        self.assertEqual(
+            [(button.text, button.callback_data) for button in markup.inline_keyboard[-1]],
+            [("« Назад в поиск", CB_FIND), ("В главное меню", CB_HOME)],
+        )
+        self.assertTrue(
+            all(
+                len(button.callback_data or "") < 64
+                for row in markup.inline_keyboard
+                for button in row
+            )
+        )
+
+    def test_users_callbacks_are_stateless_and_strict(self) -> None:
+        self.assertEqual(_parse_users_page_callback("adm_users:p:d:0"), ("d", 0))
+        self.assertEqual(_parse_users_open_callback("adm_users:o:123"), 123)
+        for data in ("adm_users:p:x:0", "adm_users:p:s:-1", "adm_users:p:s:+1", "adm_users:p:s:1:2", ""):
+            self.assertIsNone(_parse_users_page_callback(data), data)
+        for data in ("adm_users:o:-1", "adm_users:o:+1", "adm_users:o:1:2", ""):
+            self.assertIsNone(_parse_users_open_callback(data), data)
+
+    async def test_users_list_badges_use_dash_only_when_present(self) -> None:
+        for user_id in range(1, 6):
+            await self.storage.users.upsert_user(
+                "bot_a", user_id, username="<plain&>" if user_id == 1 else f"u{user_id}"
+            )
+        await self.storage.roles.grant_role("bot_a", 2, "admin", granted_by=100)
+        await self.storage.users.set_ban("bot_a", 3, True, "reason")
+        await self.storage.users.set_shadow_ban("bot_a", 4, True, "reason")
+        await self.storage.subscriptions.grant_gift_access(
+            "bot_a", 5, granted_by=100, days=30
+        )
+        users = await self.storage.users.list_users_page("bot_a", limit=15, offset=0)
+        text, _markup = await _users_page_card(
+            self.storage, "bot_a", users, len(users), 0, 1, "s"
+        )
+        plain_line = next(line for line in text.splitlines() if "&lt;plain&amp;&gt;" in line)
+        self.assertNotIn(" — ", plain_line)
+        self.assertIn("[Админ]", text)
+        self.assertIn("[Заблокирован]", text)
+        self.assertIn("[Shadow]", text)
+        self.assertIn("[Gift]", text)
+        super_line = next(line for line in text.splitlines() if "<code>100</code>" in line)
+        self.assertIn("[Суперадмин]", super_line)
+        self.assertNotIn("[Админ]", super_line)
+
+    async def test_users_pagination_has_exact_direction_labels(self) -> None:
+        for user_id in range(1, 3):
+            await self.storage.users.upsert_user("bot_a", user_id)
+        users = await self.storage.users.list_users_page("bot_a", limit=15, offset=0)
+        _text, first = await _users_page_card(self.storage, "bot_a", users, 31, 0, 3, "s")
+        _text, middle = await _users_page_card(self.storage, "bot_a", users, 31, 1, 3, "s")
+        _text, last = await _users_page_card(self.storage, "bot_a", users, 31, 2, 3, "s")
+        self.assertEqual([button.text for button in first.inline_keyboard[-2]], ["Вперёд ➡️"])
+        self.assertEqual(
+            [button.text for button in middle.inline_keyboard[-2]],
+            ["⬅️ Назад", "Вперёд ➡️"],
+        )
+        self.assertEqual([button.text for button in last.inline_keyboard[-2]], ["⬅️ Назад"])
+
+    async def test_users_back_destination_follows_origin(self) -> None:
+        _text, search = await _users_page_card(self.storage, "bot_a", [], 0, 0, 1, "s")
+        _text, database = await _users_page_card(self.storage, "bot_a", [], 0, 0, 1, "d")
+        self.assertEqual(
+            [(button.text, button.callback_data) for button in search.inline_keyboard[-1]],
+            [("« Назад в поиск", CB_FIND), ("В главное меню", CB_HOME)],
+        )
+        self.assertEqual(
+            [(button.text, button.callback_data) for button in database.inline_keyboard[-1]],
+            [("« Назад в БД", CB_GO_DB), ("В главное меню", CB_HOME)],
+        )
+
+    async def test_forged_users_callbacks_answer_without_sql(self) -> None:
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        dp = Dispatcher()
+        dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=100, type="private"),
+            from_user=_user(100),
+            text="panel",
+        )
+        with patch.object(
+            self.storage.users, "count_users", new=AsyncMock(side_effect=AssertionError("SQL"))
+        ):
+            for update_id, data in enumerate(("adm_users:p:x:0", "adm_users:o:-1"), start=1):
+                await dp.feed_update(
+                    bot,
+                    Update(
+                        update_id=update_id,
+                        callback_query=CallbackQuery(
+                            id=str(update_id),
+                            from_user=_user(100),
+                            chat_instance="x",
+                            data=data,
+                            message=panel,
+                        ),
+                    ),
+                )
+        answers = [
+            item for item in session.requests if item.__class__.__name__ == "AnswerCallbackQuery"
+        ]
+        self.assertEqual(len(answers), 2)
+        await bot.session.close()
+
+    async def test_empty_lookup_repeats_html_card_without_escaping_tags(self) -> None:
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        dp = Dispatcher()
+        dp.include_router(create_admin_router("bot_a", self.storage, self.config))
+        panel = Message(
+            message_id=50,
+            date=1,
+            chat=Chat(id=100, type="private"),
+            from_user=_user(100),
+            text="panel",
+        )
+        await dp.feed_update(
+            bot,
+            Update(
+                update_id=1,
+                callback_query=CallbackQuery(
+                    id="1",
+                    from_user=_user(100),
+                    chat_instance="x",
+                    data=CB_FIND,
+                    message=panel,
+                ),
+            ),
+        )
+        session.requests.clear()
+        await dp.feed_update(
+            bot,
+            Update(
+                update_id=2,
+                message=Message(
+                    message_id=51,
+                    date=1,
+                    chat=Chat(id=100, type="private"),
+                    from_user=_user(100),
+                    text="",
+                ),
+            ),
+        )
+        sent = [item for item in session.requests if item.__class__.__name__ == "SendMessage"]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].text, FIND_PROMPT)
+        self.assertEqual(sent[0].parse_mode, "HTML")
+        self.assertEqual(
+            sent[0].reply_markup.inline_keyboard[0][0].callback_data,
+            "adm_users:p:s:0",
+        )
+        await bot.session.close()
+
+
+class TestAdminV2A7(unittest.TestCase):
+    def test_sanction_audit_exact_html_and_escaping(self) -> None:
+        self.assertEqual(
+            format_sanction_audit(
+                "ban",
+                target_id=16,
+                target_username="<neo>",
+                actor_id=100,
+                actor_username="boss&co",
+                reason="<reason>&",
+            ),
+            "🚫 <b>Блокировка пользователя</b>\n\n"
+            "Пользователь: @&lt;neo&gt; (ID: <code>16</code>)\n"
+            "Администратор: @boss&amp;co (ID: <code>100</code>)\n"
+            "Тип санкции: <b>Полный бан</b>\n"
+            "Причина: <b>&lt;reason&gt;&amp;</b>",
+        )
+        self.assertNotIn(
+            "Причина:",
+            format_sanction_audit(
+                "unban", target_id=16, target_username=None, actor_id=100, actor_username=None
+            ),
+        )
 
 
 if __name__ == "__main__":

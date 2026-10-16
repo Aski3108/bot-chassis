@@ -7,7 +7,10 @@ from aiogram.types import Message
 
 from ..followup import PendingInput, PendingInputKind, PendingInputStore, PendingScope
 
-FIND_PROMPT = "Пришлите ID или @username."
+FIND_PROMPT = """🔍 <b>Поиск пользователя</b>
+
+Отправьте в чат @username или числовой ID пользователя.
+Либо откройте полный список пользователей базы данных."""
 FIND_CANCELLED = "Поиск отменён."
 SANCTION_STALE = "Действие устарело"
 SANCTION_TARGET_MISMATCH = "Это ожидание для другого пользователя"

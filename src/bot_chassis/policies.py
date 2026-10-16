@@ -14,7 +14,7 @@ DEFAULT_TRANSPORT_LIMIT = 50 * 1024 * 1024
 
 @dataclass(frozen=True, slots=True)
 class BackupPolicy:
-    """Каталог, пояс UTC+5, окно 04:00, ротация 14/8. None в фабрике = без автоматики."""
+    """Каталог, пояс UTC+5, окно 04:00 и ротация 14/8 для файловой SQLite."""
 
     directory: str
     tz_offset_hours: int = 5

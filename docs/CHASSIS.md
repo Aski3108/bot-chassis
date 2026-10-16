@@ -79,7 +79,7 @@ async def main(bot: Bot) -> None:
         before_chassis_menu_action=None,
         extra_user_dossier_lines=None,
         extra_user_dossier_rows=None,
-        backup_policy=None,               # None → без ночного ZIP
+        backup_policy=None,               # None → штатный ночной ZIP для файловой SQLite
         reporting_policy=None,            # None → без вечернего отчёта
         process_control=None,             # None → кнопки рестарта нет
     )
@@ -156,7 +156,9 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 а `BackupPolicy` / `ReportingPolicy` на фабрике.
 
 `BackupPolicy`: каталог ZIP, пояс UTC+5, слот 04:00, ротация 14 daily / 8 weekly.
-`None` — автоматики нет, ручной `/backup` как раньше.
+`None` включает штатный ночной ZIP только для файловой SQLite. `False` явно отключает
+автобэкап. Для `:memory:` и SQLite URI с `mode=memory` автобэкап при `None` не создаётся;
+ручной `/backup` остаётся доступен как раньше.
 
 `ReportingPolicy`: слот 23:30 UTC+5 в events; ошибка доставки — в ops.
 `None` — без вечерних отчётов.
@@ -197,7 +199,7 @@ await chassis.vouchers.redeem_voucher(bot_id, user_id, voucher_id)
 | `donation_catalog` | SKU с `issues_voucher=False` | Внешний каталог донатов. Пустой список скрывает «Поддержать проект». Суммы 50/100/500 задаёт кузов |
 | `donation_hint` | `None` | Необязательная рублёвая подсказка на экране доната, не курс и не шлюз |
 | `review_sink` | `None` | Если нет — кнопка отзыва скрыта. Сток копирует материал в очередь модерации и публикует в канал; SQLite хранит только ID и согласие |
-| `backup_policy` | `None` | Ночной ZIP в каталог, claim сети, ротация 14/8. `None` — без планировщика, ручной `/backup` как раньше |
+| `backup_policy` | `None` | Для файловой SQLite `None` включает штатный ночной ZIP; `False` отключает. Для `:memory:` и URI с `mode=memory` планировщик не создаётся. Ручной `/backup` сохраняется |
 | `reporting_policy` | `None` | Вечерний отчёт рамы в 23:30 UTC+5 в events (ошибка доставки — в ops). `None` — без отчётов |
 | `process_control` | `None` | Внешний `ProcessControlPort`. `None` — кнопки рестарта нет. Адаптер и имена процессов живут в кузове |
 | `single_message_start` | `False` | Последний keyword-only аргумент. `False` оставляет два сообщения `/start`. `True` склеивает только простой `ChassisScreen` без Inline и без переключателя языка с Reply-клавиатурой и не пишет его в tracker. Inline, язык и уже отправленный `Message` остаются отдельными сообщениями |

@@ -419,6 +419,10 @@ async def run(bot: Bot) -> None:
 В рабочем Listener конфигурация и ID приходят из его settings/env-слоя; числа
 из примера не копируются в production.
 
+Для файловой SQLite значение `backup_policy=None` включает штатный ночной
+бэкап. Явное `False` отключает его; для `:memory:` и URI с `mode=memory`
+планировщик бэкапа не создаётся.
+
 `message` покрывает сообщения супергрупп, а публикации каналов приходят отдельным
 update `channel_post`. Если Listener анализирует правки, он дополнительно включает
 `edited_message` и/или `edited_channel_post` и регистрирует одноимённые observers.

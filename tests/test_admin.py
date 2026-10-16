@@ -455,13 +455,13 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         actor_chat = [item for item in self._named("SendMessage") if item.chat_id == 14]
         self.assertTrue(any("забанен" in item.text for item in actor_chat))
         audit = [item for item in self._named("SendMessage") if item.chat_id == -100]
-        self.assertTrue(any("Бан user_id=16" in item.text and "&lt;script&gt;" in item.text for item in audit))
+        self.assertTrue(any("Блокировка пользователя" in item.text and "&lt;script&gt;" in item.text for item in audit))
         self.assertTrue(all("<script>" not in item.text for item in audit))
 
         self.session.requests.clear()
         await self._feed_text(14, "/unban 16", 2)
         self.assertFalse((await self.storage.users.get_user("bot_a", 16)).is_banned)
-        self.assertTrue(any("Разбан user_id=16" in item.text for item in self._named("SendMessage")))
+        self.assertTrue(any("Пользователь разблокирован" in item.text for item in self._named("SendMessage")))
 
         self.session.requests.clear()
         await self._feed_text(14, "/shadowban 16 1", 3)

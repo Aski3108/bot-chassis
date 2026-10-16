@@ -218,6 +218,7 @@ def db_menu_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📥 Выгрузка пользователей (.xlsx)", callback_data="adm_export")],
             [InlineKeyboardButton(text="💾 Бэкап базы данных (.db)", callback_data=CB_DO_BACKUP)],
+            [InlineKeyboardButton(text="👥 Список пользователей в Telegram", callback_data="adm_users:p:d:0")],
             *back_only_keyboard().inline_keyboard,
         ]
     )

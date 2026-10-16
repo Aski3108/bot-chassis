@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from loguru import logger
 
@@ -52,6 +54,25 @@ def slot_key(slot_utc: datetime) -> str:
     return aware.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def format_backup_notification(result: SnapshotResult | None, project_label: str) -> str:
+    label = html.escape(project_label)
+    if result is None:
+        return "💾 <b>Автоматический бэкап базы данных</b>\n\nСтатус: 🔴 Ошибка\nПроект: <b>" + label + "</b>"
+    size = result.bytes
+    if size < 1024:
+        human_size = f"{size} Б"
+    elif size < 1024 ** 2:
+        human_size = f"{size / 1024:.1f} КБ"
+    else:
+        human_size = f"{size / 1024 ** 2:.1f} МБ"
+    return (
+        "💾 <b>Автоматический бэкап базы данных</b>\n\n"
+        f"Статус: 🟢 Успешно ({html.escape(result.kind)})\n"
+        f"Архив: <b>{html.escape(Path(result.path).stem)}</b>\n"
+        f"Размер: <b>{human_size}</b>\nПроект: <b>{label}</b>"
+    )
+
+
 class BackupScheduler:
     def __init__(
         self,
@@ -62,6 +83,7 @@ class BackupScheduler:
         policy: BackupPolicy,
         origin_bot_id: str,
         telegram_bot_id: int,
+        project_label: str | None = None,
     ) -> None:
         self._bot = bot
         self._config = config
@@ -69,6 +91,7 @@ class BackupScheduler:
         self._policy = policy
         self._origin = origin_bot_id
         self._telegram_bot_id = telegram_bot_id
+        self._project_label = project_label or origin_bot_id
         self._claim_owner = f"{origin_bot_id}|{telegram_bot_id}|{uuid.uuid4().hex}"
         self._stop = asyncio.Event()
 
@@ -118,7 +141,7 @@ class BackupScheduler:
                 complete=True,
                 expected_claimed_by=self._claim_owner,
             )
-            await self._notify_ops(f"Backup failed. slot={scheduled_for} by={self.claimed_by}: {exc}")
+            await self._notify_ops(format_backup_notification(None, self._project_label))
             if not isinstance(exc, BackupError):
                 raise
             return None
@@ -131,9 +154,7 @@ class BackupScheduler:
             complete=True,
             expected_claimed_by=self._claim_owner,
         )
-        await self._notify_ops(
-            f"Backup ok. {result.kind} {result.path.name} bytes={result.bytes} by={self.claimed_by}"
-        )
+        await self._notify_ops(format_backup_notification(result, self._project_label))
         return result
 
     async def loop(self) -> None:
@@ -156,7 +177,7 @@ class BackupScheduler:
     async def _notify_ops(self, text: str) -> None:
         destination = resolve_service_destination(self._config, "ops")
         try:
-            await deliver_service_message(self._bot, destination, text)
+            await deliver_service_message(self._bot, destination, text, parse_mode="HTML")
         except Exception:
             logger.exception("Не удалось отправить итог бэкапа в ops")
 
@@ -197,6 +218,7 @@ class ReportScheduler:
         origin_bot_id: str,
         telegram_bot_id: int,
         donation_sku_codes: tuple[str, ...] = (),
+        project_label: str | None = None,
     ) -> None:
         self._bot = bot
         self._config = config
@@ -204,6 +226,7 @@ class ReportScheduler:
         self._policy = policy
         self._origin = origin_bot_id
         self._telegram_bot_id = telegram_bot_id
+        self._project_label = project_label or origin_bot_id
         self._donation_sku_codes = donation_sku_codes
         self._claim_owner = f"{origin_bot_id}|{telegram_bot_id}|{uuid.uuid4().hex}"
         self._stop = asyncio.Event()
@@ -300,6 +323,9 @@ class ReportScheduler:
                 weekly=weekly,
                 monthly=monthly,
                 slot_utc=slot,
+                project_label=self._project_label,
+                current_origin_bot_id=self._origin,
+                current_telegram_bot_id=self._telegram_bot_id,
             )
         except Exception as exc:
             logger.exception("Вечерний отчёт не собран")
@@ -361,7 +387,7 @@ class ReportScheduler:
         events = resolve_service_destination(self._config, "events")
         if events is not None:
             try:
-                await deliver_service_message(self._bot, events, text)
+                await deliver_service_message(self._bot, events, text, parse_mode="HTML")
                 return True
             except Exception as exc:
                 logger.exception("Не удалось отправить отчёт в events")
@@ -372,7 +398,7 @@ class ReportScheduler:
             logger.error("Нет events/ops для отчёта рамы")
             return False
         try:
-            await deliver_service_message(self._bot, ops, text)
+            await deliver_service_message(self._bot, ops, text, parse_mode="HTML")
             return True
         except Exception as exc:
             logger.exception("Не удалось отправить отчёт в ops")

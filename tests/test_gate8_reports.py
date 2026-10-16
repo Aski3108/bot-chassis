@@ -6,6 +6,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -18,8 +19,11 @@ from bot_chassis.config import BotChassisConfig, SkuItem
 from bot_chassis.factory import create_complete_chassis
 from bot_chassis.policies import REPORT_JOB_KEY, ReportingPolicy, UTC_PLUS_5
 from bot_chassis.reports import (
+    BotAudience,
+    ChassisAggregates,
     collect_chassis_aggregates,
     daily_period_start,
+    format_chassis_report,
     is_month_end,
     is_sunday,
 )
@@ -55,6 +59,35 @@ class _Session(BaseSession):
 
 def _stamp(local: datetime) -> str:
     return local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _aggregate(**changes) -> ChassisAggregates:
+    base = ChassisAggregates(
+        period_start=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        period_end=datetime(2026, 10, 2, tzinfo=timezone.utc),
+        new_users=1,
+        banned=2,
+        shadow_banned=3,
+        paid_count=4,
+        paid_stars=5,
+        refunded_count=6,
+        refunded_stars=7,
+        payment_errors=8,
+        donation_count=9,
+        donation_stars=10,
+        tickets_created=11,
+        tickets_open=12,
+        tickets_in_progress=13,
+        tickets_closed=14,
+        backup_done=15,
+        backup_failed=0,
+        last_backup_details="daily_<archive>.zip",
+        job_failures=16,
+        restarts=17,
+        chassis_errors=18,
+        per_bot=(),
+    )
+    return replace(base, **changes)
 
 
 class TestGate8Reports(unittest.IsolatedAsyncioTestCase):
@@ -210,7 +243,7 @@ class TestGate8Reports(unittest.IsolatedAsyncioTestCase):
         )
         text = await scheduler.run_due(datetime(2026, 10, 6, 23, 30, tzinfo=UTC_PLUS_5))
         self.assertIsNotNone(text)
-        self.assertIn("Новые пользователи: 1", text)
+        self.assertIn("Новые пользователи: <b>1</b>", text)
         self.assertIn("2026-10-05 00:00", text)
         await bot.session.close()
 
@@ -302,11 +335,11 @@ class TestGate8Reports(unittest.IsolatedAsyncioTestCase):
         )
         text = await scheduler.run_due(datetime(2026, 5, 31, 23, 30, tzinfo=UTC_PLUS_5))
         self.assertIsNotNone(text)
-        self.assertEqual(text.count("Отчёт рамы"), 1)
-        self.assertIn("Недельный итог", text)
-        self.assertIn("Месячный итог", text)
-        self.assertIn("Донаты Stars: 1/50⭐", text)
-        self.assertIn("успешно 2/150⭐", text)
+        self.assertEqual(text.count("отчёт рамы"), 3)
+        self.assertIn("Недельный отчёт рамы", text)
+        self.assertIn("Месячный отчёт рамы", text)
+        self.assertIn("Донаты Stars: <b>50 ⭐</b> (1 шт.)", text)
+        self.assertIn("Оплаты Stars: <b>150 ⭐</b> (2 шт.)", text)
         events = [
             item
             for item in session.requests
@@ -314,6 +347,7 @@ class TestGate8Reports(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].text, text)
+        self.assertEqual(events[0].parse_mode, "HTML")
         weekday = await scheduler.run_due(datetime(2026, 10, 5, 23, 30, tzinfo=UTC_PLUS_5))
         self.assertIsNotNone(weekday)
         self.assertNotIn("Недельный итог", weekday)
@@ -359,17 +393,85 @@ class TestGate8Reports(unittest.IsolatedAsyncioTestCase):
         session = _Session()
         bot = Bot(token="123456:ABC", session=session)
         config = BotChassisConfig(bot_id="tenant", db_path=self.db_path, enable_admin=False, enable_payments=False)
-        plain = await create_complete_chassis(bot, config)
-        await plain.dp.emit_startup(bot=bot)
-        self.assertIsNone(plain.dp.workflow_data.get("chassis_report_task"))
-        await plain.dp.emit_shutdown(bot=bot)
-        armed = await create_complete_chassis(bot, config, reporting_policy=self.policy)
-        await armed.dp.emit_startup(bot=bot)
-        task = armed.dp.workflow_data.get("chassis_report_task")
-        self.assertIsNotNone(task)
-        await armed.dp.emit_shutdown(bot=bot)
-        self.assertTrue(task.cancelled() or task.done())
+        with (
+            patch(
+                "bot_chassis.scheduler.BackupScheduler.run_due",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "bot_chassis.scheduler.ReportScheduler.run_due",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            plain = await create_complete_chassis(bot, config)
+            await plain.dp.emit_startup(bot=bot)
+            self.assertIsNone(plain.dp.workflow_data.get("chassis_report_task"))
+            await plain.dp.emit_shutdown(bot=bot)
+            armed = await create_complete_chassis(bot, config, reporting_policy=self.policy)
+            await armed.dp.emit_startup(bot=bot)
+            task = armed.dp.workflow_data.get("chassis_report_task")
+            self.assertIsNotNone(task)
+            self.assertIsNotNone(armed.dp.workflow_data.get("chassis_backup_task"))
+            await armed.dp.emit_shutdown(bot=bot)
+            self.assertTrue(task.cancelled() or task.done())
+            self.assertIsNone(armed.dp.workflow_data.get("chassis_backup_task"))
         await bot.session.close()
+
+
+class TestA7ReportFormatting(unittest.TestCase):
+    def test_report_renders_each_per_bot_row_without_folding(self) -> None:
+        block = _aggregate(
+            per_bot=(
+                BotAudience("origin", 1, 2, 3, 4, 5, 6),
+                BotAudience("<other>", 2, 7, 8, 9, 10, 11),
+            )
+        )
+        text = format_chassis_report(
+            block,
+            ReportingPolicy(),
+            slot_utc=block.period_end,
+            project_label="<Main>",
+            current_origin_bot_id="origin",
+            current_telegram_bot_id=1,
+        )
+        self.assertEqual(text.count("• Живая база ("), 2)
+        self.assertIn("Живая база (&lt;Main&gt;): активных <b>2</b>", text)
+        self.assertIn("Живая база (&lt;other&gt; / bot 2): активных <b>7</b>", text)
+
+    def test_report_backup_status_all_four_branches(self) -> None:
+        cases = (
+            (_aggregate(backup_done=1, backup_failed=0), "🟢 успешно — запусков <b>1</b>"),
+            (_aggregate(backup_done=1, backup_failed=2), "🟡 частично — успешно <b>1</b> · ошибок <b>2</b>"),
+            (_aggregate(backup_done=0, backup_failed=2), "🔴 ошибка — неуспешных запусков <b>2</b>"),
+            (_aggregate(backup_done=0, backup_failed=0), "⚪ не запускался"),
+        )
+        for block, expected in cases:
+            text = format_chassis_report(
+                block, ReportingPolicy(), slot_utc=block.period_end
+            )
+            self.assertIn(f"• Ночной бэкап: {expected}", text)
+        success = format_chassis_report(
+            cases[0][0], ReportingPolicy(), slot_utc=cases[0][0].period_end
+        )
+        self.assertIn("последний архив: <b>daily_&lt;archive&gt;</b>", success)
+
+    def test_report_exact_human_labels_keep_every_aggregate(self) -> None:
+        block = _aggregate()
+        text = format_chassis_report(
+            block, ReportingPolicy(), slot_utc=block.period_end
+        )
+        expected_lines = (
+            "• Новые пользователи: <b>1</b>",
+            "• Санкции: баны <b>2</b> · теневые <b>3</b>",
+            "• Оплаты Stars: <b>5 ⭐</b> (4 шт.) · возвраты: <b>7 ⭐</b> (6 шт.)",
+            "• Ошибки оплат: <b>8</b>",
+            "• Донаты Stars: <b>10 ⭐</b> (9 шт.)",
+            "• Обращения: создано <b>11</b> · открыто <b>12</b> · в работе <b>13</b> · закрыто <b>14</b>",
+            "• Ошибки планировщика: <b>16</b> · Ошибки рамы: <b>18</b>",
+            "• Рестарты процессов: <b>17</b>",
+        )
+        for line in expected_lines:
+            self.assertEqual(text.count(line), 1, line)
 
 
 if __name__ == "__main__":

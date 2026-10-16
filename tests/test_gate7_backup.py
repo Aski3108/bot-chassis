@@ -19,13 +19,20 @@ from aiogram.types import Chat, Message, Update, User
 
 from bot_chassis.admin.router import create_admin_router
 from bot_chassis.config import BotChassisConfig
-from bot_chassis.factory import create_complete_chassis
+from bot_chassis.factory import _is_persistent_sqlite, create_complete_chassis
 from bot_chassis.policies import BACKUP_JOB_KEY, BackupPolicy
-from bot_chassis.scheduler import BackupScheduler, due_slot_utc, register_backup_scheduler, slot_key
+from bot_chassis.scheduler import (
+    BackupScheduler,
+    due_slot_utc,
+    format_backup_notification,
+    register_backup_scheduler,
+    slot_key,
+)
 from bot_chassis.storage import create_storage
 from bot_chassis.storage.backup import (
     ARCHIVE_DB_NAME,
     BackupError,
+    SnapshotResult,
     create_nightly_archive,
     verify_sqlite,
 )
@@ -247,24 +254,116 @@ class TestGate7Backup(unittest.IsolatedAsyncioTestCase):
         created = await owner.run_due(monday)
         self.assertIsNotNone(created)
         ops = [item for item in session.requests if item.__class__.__name__ == "SendMessage"]
-        self.assertTrue(any("Backup ok" in (getattr(item, "text", "") or "") for item in ops))
+        self.assertTrue(any("Автоматический бэкап базы данных" in (getattr(item, "text", "") or "") for item in ops))
         self.assertTrue(all(getattr(item, "chat_id", None) != 7 for item in session.requests if item.__class__.__name__ == "SendDocument"))
         await bot.session.close()
 
-    async def test_factory_none_skips_scheduler_owner_registers_lifecycle(self) -> None:
+    async def test_backup_policy_normalization_file_none_false_and_memory(self) -> None:
         session = _Session()
         bot = Bot(token="123456:ABC", session=session)
         config = BotChassisConfig(bot_id="tenant", db_path=self.db_path, enable_admin=False, enable_payments=False)
         plain = await create_complete_chassis(bot, config)
         await plain.dp.emit_startup(bot=bot)
-        self.assertIsNone(plain.dp.workflow_data.get("chassis_backup_task"))
+        self.assertIsNotNone(plain.dp.workflow_data.get("chassis_backup_task"))
         await plain.dp.emit_shutdown(bot=bot)
+        disabled = await create_complete_chassis(bot, config, backup_policy=False)
+        await disabled.dp.emit_startup(bot=bot)
+        self.assertIsNone(disabled.dp.workflow_data.get("chassis_backup_task"))
+        await disabled.dp.emit_shutdown(bot=bot)
         armed = await create_complete_chassis(bot, config, backup_policy=self.policy)
         await armed.dp.emit_startup(bot=bot)
         task = armed.dp.workflow_data.get("chassis_backup_task")
         self.assertIsNotNone(task)
         await armed.dp.emit_shutdown(bot=bot)
         self.assertTrue(task.cancelled() or task.done())
+        memory = await create_complete_chassis(
+            bot,
+            BotChassisConfig(
+                bot_id="tenant",
+                db_path=":memory:",
+                enable_admin=False,
+                enable_payments=False,
+            ),
+            storage=self.storage,
+        )
+        await memory.dp.emit_startup(bot=bot)
+        self.assertIsNone(memory.dp.workflow_data.get("chassis_backup_task"))
+        await memory.dp.emit_shutdown(bot=bot)
+        await bot.session.close()
+
+    def test_memory_databases_do_not_enable_default_backup(self) -> None:
+        self.assertFalse(_is_persistent_sqlite(None))
+        self.assertFalse(_is_persistent_sqlite(""))
+        self.assertFalse(_is_persistent_sqlite(":memory:"))
+        self.assertFalse(_is_persistent_sqlite("file:volatile?mode=memory&cache=shared"))
+        self.assertTrue(_is_persistent_sqlite(self.db_path))
+
+    async def test_only_resolved_backup_policy_flows_down(self) -> None:
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        config = BotChassisConfig(
+            bot_id="tenant", db_path=self.db_path, enable_payments=False
+        )
+        with patch(
+            "bot_chassis.factory.create_admin_router", wraps=create_admin_router
+        ) as builder:
+            disabled = await create_complete_chassis(bot, config, backup_policy=False)
+        self.assertIsNone(builder.call_args.kwargs["backup_policy"])
+        await disabled.dp.emit_shutdown(bot=bot)
+        with patch(
+            "bot_chassis.factory.create_admin_router", wraps=create_admin_router
+        ) as builder:
+            default = await create_complete_chassis(bot, config)
+        self.assertIsInstance(builder.call_args.kwargs["backup_policy"], BackupPolicy)
+        await default.dp.emit_shutdown(bot=bot)
+        await bot.session.close()
+
+    def test_backup_notification_uses_factory_project_label_stem_and_human_size(self) -> None:
+        cases = ((0, "0 Б"), (1023, "1023 Б"), (1024, "1.0 КБ"), (1024 ** 2, "1.0 МБ"))
+        for size, expected in cases:
+            text = format_backup_notification(
+                SnapshotResult(Path("daily_<archive>.zip"), "daily", size), "<Project>"
+            )
+            self.assertIn("Архив: <b>daily_&lt;archive&gt;</b>", text)
+            self.assertIn(f"Размер: <b>{expected}</b>", text)
+            self.assertIn("Проект: <b>&lt;Project&gt;</b>", text)
+            self.assertNotIn(".zip", text)
+
+    def test_backup_failure_notification_hides_exception(self) -> None:
+        secret = "secret path C:/private.db"
+        text = format_backup_notification(None, "x")
+        self.assertEqual(
+            text,
+            "💾 <b>Автоматический бэкап базы данных</b>\n\nСтатус: 🔴 Ошибка\nПроект: <b>x</b>",
+        )
+        self.assertNotIn(secret, text)
+
+    async def test_backup_cards_are_delivered_as_html_without_exception_details(self) -> None:
+        session = _Session()
+        bot = Bot(token="123456:ABC", session=session)
+        scheduler = BackupScheduler(
+            bot=bot,
+            config=BotChassisConfig(
+                bot_id="tenant", db_path=self.db_path, audit_chat_id=-100, ops_thread_id=9
+            ),
+            storage=self.storage,
+            policy=self.policy,
+            origin_bot_id="owner",
+            telegram_bot_id=1,
+            project_label="Project",
+        )
+        with patch(
+            "bot_chassis.scheduler.create_nightly_archive",
+            new=AsyncMock(side_effect=BackupError("C:/private.db secret")),
+        ):
+            self.assertIsNone(
+                await scheduler.run_due(datetime(2026, 10, 5, 4, 0, tzinfo=self.policy.tz))
+            )
+        sent = [item for item in session.requests if item.__class__.__name__ == "SendMessage"]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].parse_mode, "HTML")
+        self.assertNotIn("private.db", sent[0].text)
+        self.assertNotIn("secret", sent[0].text)
         await bot.session.close()
 
     async def test_manual_oversize_keeps_catalog_copy_with_size(self) -> None:

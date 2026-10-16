@@ -12,6 +12,41 @@ from ..config import BotChassisConfig
 from ..service_notify import deliver_service_message, resolve_service_destination
 
 
+def format_sanction_audit(
+    action: str,
+    *,
+    target_id: int,
+    target_username: str | None,
+    actor_id: int,
+    actor_username: str | None,
+    reason: str | None = None,
+) -> str:
+    """Собрать безопасную HTML-карточку изменения санкции."""
+    target_identity = html.escape(f"@{target_username}" if target_username else "без username")
+    actor_identity = html.escape(f"@{actor_username}" if actor_username else "без username")
+    common = (
+        f"Пользователь: {target_identity} (ID: <code>{target_id}</code>)\n"
+        f"Администратор: {actor_identity} (ID: <code>{actor_id}</code>)"
+    )
+    if action == "ban":
+        return (
+            "🚫 <b>Блокировка пользователя</b>\n\n"
+            f"{common}\nТип санкции: <b>Полный бан</b>\n"
+            f"Причина: <b>{html.escape(reason or 'Не указана')}</b>"
+        )
+    if action == "shadow_on":
+        return (
+            "👤🕶 <b>Теневой бан пользователя</b>\n\n"
+            f"{common}\nТип санкции: <b>Теневой бан</b>\n"
+            f"Причина: <b>{html.escape(reason or 'Не указана')}</b>"
+        )
+    if action == "unban":
+        return "✅ <b>Пользователь разблокирован</b>\n\n" + common
+    if action == "shadow_off":
+        return "✅ <b>Теневой бан снят</b>\n\n" + common
+    raise ValueError(f"Unknown sanction action: {action}")
+
+
 async def send_admin_audit(
     bot: Bot | None,
     config: BotChassisConfig,

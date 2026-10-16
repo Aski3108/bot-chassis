@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import inspect
+import math
 import os
 import tempfile
 import time
@@ -38,7 +39,7 @@ from ..ports.admin_extra import ExtraAdminActions
 from ..storage.backup import write_manual_snapshot
 from ..storage import Storage
 from ..storage.engine import parse_utc
-from .audit import send_admin_audit
+from .audit import format_sanction_audit, send_admin_audit
 from .broadcast import is_awaiting_broadcast_text, register_broadcast
 from .lookup import (
     FIND_CANCELLED,
@@ -75,6 +76,7 @@ CB_EXPORT = "adm_export"
 CB_BROADCAST = "adm_bcast"
 CB_HOME = "adm_home"
 CB_FIND = "adm_find"
+USERS_PAGE_SIZE = 15
 BAN_USAGE = "Формат: /ban ID|@username [причина]"
 UNBAN_USAGE = "Формат: /unban ID|@username"
 SHADOW_USAGE = "Формат: /shadowban ID|@username 0|1"
@@ -143,6 +145,25 @@ def create_admin_router(
     root = SuperadminRoleFilter(bot_id, storage.roles)
     panels = screens or AdminScreenTracker()
 
+    async def _send_sanction_audit(source, action: str, target_id: int, reason: str | None = None) -> None:
+        target = await storage.users.get_user(bot_id, target_id)
+        actor = source.from_user
+        if target is None or actor is None:
+            return
+        await send_admin_audit(
+            source.bot,
+            config,
+            format_sanction_audit(
+                action,
+                target_id=target_id,
+                target_username=target.username,
+                actor_id=actor.id,
+                actor_username=actor.username,
+                reason=reason,
+            ),
+            is_html=True,
+        )
+
     async def _actor_is_root(user_id: int) -> bool:
         return await storage.roles.has_any_role(bot_id, user_id, ("superadmin",))
 
@@ -203,11 +224,7 @@ def create_admin_router(
         if not ok:
             await _reply(message, _ban_error(err))
             return
-        await send_admin_audit(
-            message.bot,
-            config,
-            f"Бан user_id={target_id}. Причина: {reason or '—'}. actor={actor.id}",
-        )
+        await _send_sanction_audit(message, "ban", target_id, reason)
         await _reply(message, f"Пользователь {target_id} забанен")
 
     @router.message(Command("unban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
@@ -226,7 +243,7 @@ def create_admin_router(
         if not ok:
             await _reply(message, _ban_error(err))
             return
-        await send_admin_audit(message.bot, config, f"Разбан user_id={target_id}. actor={actor.id}")
+        await _send_sanction_audit(message, "unban", target_id)
         await _reply(message, f"Пользователь {target_id} разбанен")
 
     @router.message(Command("shadowban", ignore_mention=True), F.chat.type == ChatType.PRIVATE, staff)
@@ -248,11 +265,7 @@ def create_admin_router(
             await _reply(message, _shadow_error(err))
             return
         state = "включён" if enabled else "снят"
-        await send_admin_audit(
-            message.bot,
-            config,
-            f"Теневой бан {state} user_id={target_id}. actor={actor.id}",
-        )
+        await _send_sanction_audit(message, "shadow_on" if enabled else "shadow_off", target_id)
         await _reply(message, f"Теневой бан {state}: {target_id}")
 
     @router.message(Command("grant", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
@@ -625,20 +638,12 @@ def create_admin_router(
             ok, err = await storage.users.set_ban(bot_id, target_id, True, reason)
             if not ok:
                 return _ban_error(err)
-            await send_admin_audit(
-                source.bot,
-                config,
-                f"Бан user_id={target_id}. Причина: {reason}. actor={actor_id}",
-            )
+            await _send_sanction_audit(source, "ban", target_id, reason)
             return None
         ok, err = await storage.users.set_shadow_ban(bot_id, target_id, True, reason)
         if not ok:
             return _shadow_error(err)
-        await send_admin_audit(
-            source.bot,
-            config,
-            f"Теневой бан включён user_id={target_id}. Причина: {reason}. actor={actor_id}",
-        )
+        await _send_sanction_audit(source, "shadow_on", target_id, reason)
         return None
 
     async def _show_dossier_call(call, actor_id: int, target_id: int, *, keyboard_mode: str = "legacy") -> bool:
@@ -663,6 +668,43 @@ def create_admin_router(
     @router.callback_query(F.data.startswith("adm_usr:"), staff)
     async def handle_user_action(call: CallbackQuery) -> None:
         await call.answer()
+
+    async def _show_users_page(call: CallbackQuery, actor_id: int, origin: str, page: int) -> None:
+        total = await storage.users.count_users(bot_id)
+        total_pages = max(1, math.ceil(total / USERS_PAGE_SIZE))
+        page = max(0, min(page, total_pages - 1))
+        users = await storage.users.list_users_page(
+            bot_id, limit=USERS_PAGE_SIZE, offset=page * USERS_PAGE_SIZE
+        )
+        text, markup = await _users_page_card(storage, bot_id, users, total, page, total_pages, origin)
+        await panels.edit_or_send(call, bot_id, actor_id, text, markup)
+
+    @router.callback_query(F.data.startswith("adm_users:p:"), staff)
+    async def handle_users_page(call: CallbackQuery) -> None:
+        parsed = _parse_users_page_callback(call.data or "")
+        if parsed is None:
+            await call.answer()
+            return
+        origin, page = parsed
+        actor = await _require_staff_call(call)
+        if actor is None:
+            return
+        if origin == "d" and await _require_root_call(call, "База данных") is None:
+            return
+        await _show_users_page(call, actor.id, origin, page)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_users:o:"), staff)
+    async def handle_users_open(call: CallbackQuery) -> None:
+        target_id = _parse_users_open_callback(call.data or "")
+        if target_id is None:
+            await call.answer()
+            return
+        actor = await _require_staff_call(call)
+        if actor is None:
+            return
+        shown = await _show_dossier_call(call, actor.id, target_id)
+        await call.answer() if shown else await call.answer(USER_NOT_FOUND, show_alert=True)
 
     @router.message(Command("export", ignore_mention=True), F.chat.type == ChatType.PRIVATE, root)
     async def handle_export_command(message: Message) -> None:
@@ -992,8 +1034,11 @@ def create_admin_router(
             call,
             bot_id,
             actor.id,
-            FIND_PROMPT + "\n/cancel — отмена.",
-            back_only_keyboard(callback_data=CB_HOME),
+            FIND_PROMPT,
+            InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 Все пользователи базы", callback_data="adm_users:p:s:0")],
+                *back_only_keyboard(callback_data=CB_HOME).inline_keyboard,
+            ]),
         )
         await call.answer()
 
@@ -1009,7 +1054,21 @@ def create_admin_router(
             await _reply(message, FIND_CANCELLED)
             return
         if not text:
-            await _reply(message, FIND_PROMPT)
+            await message.answer(
+                FIND_PROMPT,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="👥 Все пользователи базы",
+                                callback_data="adm_users:p:s:0",
+                            )
+                        ],
+                        *back_only_keyboard(callback_data=CB_HOME).inline_keyboard,
+                    ]
+                ),
+            )
             return
         cancel_admin_lookup(bot_id, actor.id, resolved_pending_store)
         target_id = await _target_from_token(message, storage, bot_id, text, USER_NOT_FOUND)
@@ -1166,6 +1225,62 @@ def _parse_user_id(token: str) -> int | None:
     if not token.isdigit():
         return None
     return int(token)
+
+
+def _parse_users_page_callback(data: str) -> tuple[str, int] | None:
+    parts = data.split(":")
+    if len(parts) != 4 or parts[:2] != ["adm_users", "p"]:
+        return None
+    origin, page = parts[2], parts[3]
+    if origin not in {"s", "d"} or not page.isascii() or not page.isdigit():
+        return None
+    return origin, int(page)
+
+
+def _parse_users_open_callback(data: str) -> int | None:
+    parts = data.split(":")
+    if len(parts) != 3 or parts[:2] != ["adm_users", "o"] or not parts[2].isascii() or not parts[2].isdigit():
+        return None
+    return int(parts[2])
+
+
+async def _users_page_card(storage: Storage, bot_id: str, users, total: int, page: int, total_pages: int, origin: str):
+    lines = [f"👥 <b>Пользователи базы</b> (всего: <b>{total}</b>) · Стр. {page + 1}/{total_pages}", ""]
+    buttons: list[InlineKeyboardButton] = []
+    for local_index, user in enumerate(users):
+        badges = []
+        if await storage.roles.has_any_role(bot_id, user.user_id, ("superadmin",)):
+            badges.append("Суперадмин")
+        elif await storage.roles.has_any_role(bot_id, user.user_id, ("admin",)):
+            badges.append("Админ")
+        if user.is_banned:
+            badges.append("Заблокирован")
+        if user.is_shadow_banned:
+            badges.append("Shadow")
+        if await storage.subscriptions.get_active_subscription(bot_id, user.user_id) is not None:
+            badges.append("Gift")
+        suffix = f" — {' '.join(f'[{badge}]' for badge in badges)}" if badges else ""
+        ordinal = page * USERS_PAGE_SIZE + local_index + 1
+        identity = f"@{html.escape(user.username)} (<code>{user.user_id}</code>)" if user.username else f"<code>{user.user_id}</code>"
+        lines.append(f"{ordinal}. {identity}{suffix}")
+        buttons.append(InlineKeyboardButton(text=str(ordinal), callback_data=f"adm_users:o:{user.user_id}"))
+    if not users:
+        lines.append("Пользователи не найдены.")
+    rows = [buttons[index:index + 5] for index in range(0, len(buttons), 5)]
+    if total_pages > 1:
+        page_buttons = []
+        if page > 0:
+            page_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_users:p:{origin}:{page - 1}"))
+        if page < total_pages - 1:
+            page_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"adm_users:p:{origin}:{page + 1}"))
+        rows.append(page_buttons)
+    back_label = "« Назад в поиск" if origin == "s" else "« Назад в БД"
+    back_callback = CB_FIND if origin == "s" else CB_GO_DB
+    rows.append([
+        InlineKeyboardButton(text=back_label, callback_data=back_callback),
+        InlineKeyboardButton(text="В главное меню", callback_data=CB_HOME),
+    ])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _ban_error(code: str | None) -> str:
@@ -1526,31 +1641,47 @@ def _sanctions_keyboard(user) -> InlineKeyboardMarkup:
 
 async def _apply_sanction(call, storage, config, bot_id: str, action: str, target_id: int) -> str | None:
     actor_id = call.from_user.id
-    if await storage.users.get_user(bot_id, target_id) is None:
+    target = await storage.users.get_user(bot_id, target_id)
+    if target is None:
         return USER_NOT_FOUND
+    async def _audit(reason: str | None = None) -> None:
+        actor = call.from_user
+        await send_admin_audit(
+            call.bot,
+            config,
+            format_sanction_audit(
+                action,
+                target_id=target_id,
+                target_username=target.username,
+                actor_id=actor.id,
+                actor_username=actor.username,
+                reason=reason,
+            ),
+            is_html=True,
+        )
     if action == "ban":
         ok, err = await storage.users.set_ban(bot_id, target_id, True, None)
         if not ok:
             return _ban_error(err)
-        await send_admin_audit(call.bot, config, f"Бан user_id={target_id}. Причина: —. actor={actor_id}")
+        await _audit()
         return None
     if action == "unban":
         ok, err = await storage.users.set_ban(bot_id, target_id, False)
         if not ok:
             return _ban_error(err)
-        await send_admin_audit(call.bot, config, f"Разбан user_id={target_id}. actor={actor_id}")
+        await _audit()
         return None
     if action == "shadow_on":
         ok, err = await storage.users.set_shadow_ban(bot_id, target_id, True)
         if not ok:
             return _shadow_error(err)
-        await send_admin_audit(call.bot, config, f"Теневой бан включён user_id={target_id}. actor={actor_id}")
+        await _audit()
         return None
     if action == "shadow_off":
         ok, err = await storage.users.set_shadow_ban(bot_id, target_id, False)
         if not ok:
             return _shadow_error(err)
-        await send_admin_audit(call.bot, config, f"Теневой бан снят user_id={target_id}. actor={actor_id}")
+        await _audit()
         return None
     return None
 

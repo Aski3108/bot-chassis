@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Sequence
 
 from .policies import ReportingPolicy
@@ -362,39 +364,73 @@ async def collect_chassis_aggregates(
     return await storage.engine.run(_op)
 
 
-def format_aggregates(block: ChassisAggregates, policy: ReportingPolicy, *, title: str) -> str:
+def _backup_status(block: ChassisAggregates) -> str:
+    suffix = (
+        ""
+        if not block.last_backup_details
+        else " (последний архив: "
+        f"<b>{html.escape(Path(block.last_backup_details).stem)}</b>)"
+    )
+    if block.backup_done and not block.backup_failed:
+        return f"🟢 успешно — запусков <b>{block.backup_done}</b>{suffix}"
+    if block.backup_done and block.backup_failed:
+        return f"🟡 частично — успешно <b>{block.backup_done}</b> · ошибок <b>{block.backup_failed}</b>{suffix}"
+    if block.backup_failed:
+        return f"🔴 ошибка — неуспешных запусков <b>{block.backup_failed}</b>"
+    return "⚪ не запускался"
+
+
+def format_aggregates(
+    block: ChassisAggregates,
+    policy: ReportingPolicy,
+    *,
+    title: str,
+    project_label: str,
+    current_origin_bot_id: str,
+    current_telegram_bot_id: int,
+) -> str:
     lines = [
         title,
-        f"Период: {format_local(block.period_start, policy)} — {format_local(block.period_end, policy)} {policy.tz_label}",
-        f"Новые пользователи: {block.new_users}",
+        f"Период: {format_local(block.period_start, policy)} — "
+        f"{format_local(block.period_end, policy)} ({policy.tz_label})",
+        "",
+        "👥 <b>Аудитория</b>",
+        f"• Новые пользователи: <b>{block.new_users}</b>",
     ]
-    launch_bits = [
-        f"{item.origin_bot_id}/{item.telegram_bot_id}: {item.first_launches}"
-        for item in block.per_bot
-        if item.first_launches or item.telegram_bot_id
-    ]
-    lines.append("Первые запуски: " + ("; ".join(launch_bits) if launch_bits else "0"))
     for item in block.per_bot:
+        label = (
+            project_label
+            if (item.origin_bot_id, item.telegram_bot_id)
+            == (current_origin_bot_id, current_telegram_bot_id)
+            else f"{item.origin_bot_id} / bot {item.telegram_bot_id}"
+        )
         lines.append(
-            f"Аудитория {item.origin_bot_id}/{item.telegram_bot_id}: "
-            f"active {item.active}, stopped {item.stopped}, deleted {item.deleted}, unknown {item.unknown}"
+            f"• Живая база ({html.escape(label)}): активных <b>{item.active}</b> · "
+            f"остановлено <b>{item.stopped}</b> · удалено <b>{item.deleted}</b> · "
+            f"неизвестно <b>{item.unknown}</b> · первые запуски "
+            f"<b>{item.first_launches}</b>"
         )
     lines.extend(
         [
-            f"Баны: {block.banned} · теневые: {block.shadow_banned}",
-            f"Платежи Stars: успешно {block.paid_count}/{block.paid_stars}⭐ · "
-            f"ошибки {block.payment_errors} · возвраты {block.refunded_count}/{block.refunded_stars}⭐",
-            f"Донаты Stars: {block.donation_count}/{block.donation_stars}⭐",
-            (
-                f"Тикеты: создано {block.tickets_created}, open {block.tickets_open}, "
-                f"in_progress {block.tickets_in_progress}, закрыто {block.tickets_closed}"
-            ),
-            (
-                f"Задания: бэкап ok {block.backup_done}, бэкап fail {block.backup_failed}"
-                + (f" ({block.last_backup_details})" if block.last_backup_details else "")
-                + f", ошибки job {block.job_failures}, рестарты {block.restarts}, "
-                f"ошибки рамы {block.chassis_errors}"
-            ),
+            f"• Санкции: баны <b>{block.banned}</b> · "
+            f"теневые <b>{block.shadow_banned}</b>",
+            "",
+            "⭐️ <b>Финансы и поддержка</b>",
+            f"• Оплаты Stars: <b>{block.paid_stars} ⭐</b> ({block.paid_count} шт.) · "
+            f"возвраты: <b>{block.refunded_stars} ⭐</b> ({block.refunded_count} шт.)",
+            f"• Ошибки оплат: <b>{block.payment_errors}</b>",
+            f"• Донаты Stars: <b>{block.donation_stars} ⭐</b> "
+            f"({block.donation_count} шт.)",
+            f"• Обращения: создано <b>{block.tickets_created}</b> · "
+            f"открыто <b>{block.tickets_open}</b> · "
+            f"в работе <b>{block.tickets_in_progress}</b> · "
+            f"закрыто <b>{block.tickets_closed}</b>",
+            "",
+            "💾 <b>Системные задания</b>",
+            f"• Ночной бэкап: {_backup_status(block)}",
+            f"• Ошибки планировщика: <b>{block.job_failures}</b> · "
+            f"Ошибки рамы: <b>{block.chassis_errors}</b>",
+            f"• Рестарты процессов: <b>{block.restarts}</b>",
         ]
     )
     return "\n".join(lines)
@@ -407,21 +443,40 @@ def format_chassis_report(
     weekly: ChassisAggregates | None = None,
     monthly: ChassisAggregates | None = None,
     slot_utc: datetime,
+    project_label: str = "Сервис",
+    current_origin_bot_id: str = "",
+    current_telegram_bot_id: int = 0,
 ) -> str:
-    slot_local = format_local(_aware(slot_utc), policy)
     parts = [
         format_aggregates(
             daily,
             policy,
-            title=f"Отчёт рамы · {slot_local} {policy.tz_label}",
+            title="📋 <b>Суточный отчёт рамы</b>",
+            project_label=project_label,
+            current_origin_bot_id=current_origin_bot_id,
+            current_telegram_bot_id=current_telegram_bot_id,
         )
     ]
     if weekly is not None:
         parts.append(
-            format_aggregates(weekly, policy, title="Недельный итог")
+            format_aggregates(
+                weekly,
+                policy,
+                title="📋 <b>Недельный отчёт рамы</b>",
+                project_label=project_label,
+                current_origin_bot_id=current_origin_bot_id,
+                current_telegram_bot_id=current_telegram_bot_id,
+            )
         )
     if monthly is not None:
         parts.append(
-            format_aggregates(monthly, policy, title="Месячный итог")
+            format_aggregates(
+                monthly,
+                policy,
+                title="📋 <b>Месячный отчёт рамы</b>",
+                project_label=project_label,
+                current_origin_bot_id=current_origin_bot_id,
+                current_telegram_bot_id=current_telegram_bot_id,
+            )
         )
     return "\n\n".join(parts)
