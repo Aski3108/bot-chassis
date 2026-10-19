@@ -8,6 +8,8 @@
 
 **Точка сборки:** `bot_chassis.factory.create_complete_chassis`
 
+**Зависимость:** `bot-chassis @ git+https://github.com/Aski3108/bot-chassis.git@v2.0.0`
+
 **Хуки Listener:** L1 — `6f2d492`, L2 — `6823f30`
 
 Документ фиксирует границу ответственности, порядок маршрутизации и контракты,

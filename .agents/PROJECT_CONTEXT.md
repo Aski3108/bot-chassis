@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — Bot Chassis
 
-**Обновлено:** 2026-09-28
+**Обновлено:** 2026-10-19
 
 ## Продукт
 
@@ -19,6 +19,8 @@
 
 - Один пакет `src/bot_chassis`, Python 3.10+ (разработка на 3.14),
   aiogram 3.13+, SQLite WAL, изоляция `bot_id`.
+- Стабильная версия: `2.0.0`; потребители закрепляют аннотированный tag
+  `v2.0.0`, а не плавающую ветку `main`.
 - Фабрика всегда собирает рабочую раму. Часть узлов подменяется
   аргументами, часть всегда дефолтная (`WorkGatePort`, `AccessPort`,
   админ-роутер, платежный роутер, middleware).
@@ -32,6 +34,8 @@
 
 - Канон подключения и состав: `docs/CHASSIS.md`
 - Стык с PsyBot (не очередь работ): `docs/PSYBOT_INTEGRATION.md`
+- Стык с Chat Listener: `docs/LISTENER_INTEGRATION.md`
+- Разморозка Profiling Framework: `docs/PROFILING_INTEGRATION.md`
 - История проектирования: `docs/archive/` — не backlog
 - Версии: `CHANGELOG.md`, `VERSION_LOG.md`
 - Эталон запуска: `examples/run_complete_chassis.py`

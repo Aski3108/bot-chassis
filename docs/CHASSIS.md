@@ -1,4 +1,4 @@
-# Bot Chassis — канон v1
+# Bot Chassis — канон 2.0
 
 **Статус:** полная рама `2.0.0` (хирургическое обновление: редизайн админки, досье, санкций, single-message start, screen retirement, safe default backup).
 **Корень:** `C:\Python\bot_chassis`  
@@ -6,7 +6,7 @@
 **Платформа:** Python 3.10+ (разработка на 3.14), aiogram 3.13+, SQLite WAL  
 **Тесты:** `pytest tests/`; кнопочный контракт `tests/test_chassis.py` заморожен.
 
-Это рабочий факт рамы: как подключить, что внутри открыто, что заглушка с портом, чего в v1 нет.  
+Это рабочий факт рамы: как подключить, что внутри открыто, что заглушка с портом, чего в 2.0 нет.
 История версий: [CHANGELOG.md](../CHANGELOG.md). История проектирования лежит в [archive/](archive/README.md) и **не** является очередью работ.
 
 Шлюз `src/bot_chassis/bot_gateway.py` и сигнатуры Button Chassis не менять.
@@ -17,7 +17,7 @@
 
 Шасси — несущая рама Telegram-бота. Кузов (PsyBot, Profiling, Chat Listener, любой новый домен) монтируется на неё и сам вызывает порты **перед** своей работой. Рама кузов не запускает.
 
-В v1 внутри одного пакета:
+В 2.0 внутри одного пакета:
 
 | Контур | Состояние |
 |---|---|
@@ -35,6 +35,34 @@
 ## 2. Подключение
 
 Нормальный путь — полная рама. Кнопки отдельно оставляют только если админка и оплата не нужны.
+
+### Закрепить проверенную версию
+
+Для проекта на `pyproject.toml`:
+
+```toml
+dependencies = [
+  "bot-chassis @ git+https://github.com/Aski3108/bot-chassis.git@v2.0.0",
+]
+```
+
+Для `requirements.txt` используется та же PEP 508-строка:
+
+```text
+bot-chassis @ git+https://github.com/Aski3108/bot-chassis.git@v2.0.0
+```
+
+Локально до выкладки потребителя можно подключить рабочую копию:
+
+```powershell
+py -m pip install -e C:\Python\bot_chassis
+py -c "from importlib.metadata import version; print(version('bot-chassis'))"
+```
+
+В production использовать tag `v2.0.0`, а не ветку `main`: tag даёт
+неизменяемую точку установки и понятный откат на предыдущую версию.
+
+### Собрать полную раму
 
 ```python
 from aiogram import Bot, Dispatcher, Router
@@ -326,7 +354,7 @@ WAL, одна связь на транзакцию, `bot_id` везде. `amount
 Посев суперадминов: `INSERT OR IGNORE`.
 
 Таблицы: `users`, `roles`, `transactions`, `subscriptions`, `support_threads`, `support_ticket_messages`, `review_submissions`, `bot_settings`, `referrals`, `user_bot_statuses`, `scheduled_job_runs`, `chassis_events`.
-Схема: `src/bot_chassis/storage/schema.sql`. Колонки `provider` / `payment_id` готовы к другим шлюзам; **в v1 пишется только** `telegram_stars`.
+Схема: `src/bot_chassis/storage/schema.sql`. Колонки `provider` / `payment_id` готовы к другим шлюзам; **в текущем платёжном контуре пишется только** `telegram_stars`.
 
 `consent_at` шасси хранит, сбор согласия — кузов.
 
@@ -407,7 +435,7 @@ src/bot_chassis/
 
 | Файл | Назначение |
 |---|---|
-| **Этот файл** | Канон v1, подключение и состав |
+| **Этот файл** | Канон 2.0, подключение и состав |
 | [archive/](archive/README.md) | Спеки и планы, по которым раму собрали |
 
 Дальше по продукту: монтировать кузов. Раму v1 не расширять сторонними шлюзами и доменной логикой.

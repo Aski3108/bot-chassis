@@ -3,10 +3,9 @@
 **Дата:** 2026-10-19
 **Корень:** `C:\Python\bot_chassis`
 **Ветка:** `main`
-**Версия:** `2.0.0` в проверенном worktree
-**HEAD до release-коммита:** `3304e5e`
-**Проверенная граница:** `9d828c4..WORKTREE`
-**Release commit:** текущий `release: finalize bot chassis 2.0.0`
+**Версия:** `2.0.0`
+**Implementation / B6 HEAD:** `3db41c9`
+**Release tag:** аннотированный `v2.0.0` на текущем metadata-коммите
 **Profiling hold:** tag `profiling` = `6823f30` (не двигался)
 
 ## Фактическое состояние
@@ -16,10 +15,10 @@ P1–P3, A0–A7 и R2 реализованы. Первый B6 был забло
 и UI-хвостами. Correction Gate закрыл все подтверждённые находки без новых
 слоёв и обходов; повторный B6 2026-10-19 — **PASS**.
 
-Версия worktree — `2.0.0`. `tests/test_chassis.py` и
+Версия пакета — `2.0.0`. `tests/test_chassis.py` и
 `src/bot_chassis/bot_gateway.py` не изменены относительно базы Release 2.0.
-Владелец отдельной командой разрешил зафиксировать R2, B6-correction и этот
-closeout одним финальным release-коммитом. Tag и push не разрешены.
+Владелец отдельной командой разрешил release tag и push. `main` и
+аннотированный `v2.0.0` опубликованы; tag `profiling` не двигался.
 
 ## Проверка
 
@@ -32,9 +31,9 @@ closeout одним финальным release-коммитом. Tag и push н�
 
 ## Следующее действие
 
-1. Получить отдельное решение владельца о release tag и push.
+1. Выбрать первый кузов и мигрировать его отдельно по паспорту на `v2.0.0`.
 2. Не запускать live Telegram smoke или рестарт без отдельной команды.
-3. Gate 13, payment-delivery queue, Ops Sidecar и миграцию кузовов не
+3. Gate 13, payment-delivery queue, Ops Sidecar и миграции других кузовов не
    смешивать с Release 2.0.
 
 ## Жёсткие границы
