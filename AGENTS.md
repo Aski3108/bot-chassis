@@ -18,7 +18,7 @@ Before planning or changing code, read in this order:
 4. `.agents/PROJECT_CONTEXT.md`
 5. `.agents/ACTIVE_PLANS.md`
 6. `.agents/TASK_TODO.md` — the live task queue
-7. For active Release 2.0 work: `.agents/UPGRADE_2_0_PLAN_AUDIT.md`
+7. For active Release 1.0 work: `.agents/UPGRADE_1_0_PLAN_AUDIT.md`
 8. Framework canon: `docs/CHASSIS.md`
 9. `.agents/PROJECT_LOG.md` — only the latest relevant entries
 

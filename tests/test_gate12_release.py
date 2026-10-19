@@ -104,7 +104,7 @@ def _texts(session: _Session):
 
 
 class TestGate12FactoryContract(unittest.TestCase):
-    def test_release_2_0_public_factory_defaults(self) -> None:
+    def test_release_1_0_public_factory_defaults(self) -> None:
         signature = inspect.signature(create_complete_chassis)
         for name in NEW_NONE_KWONLY:
             param = signature.parameters[name]
@@ -122,14 +122,14 @@ class TestGate12FactoryContract(unittest.TestCase):
             ("message", "callback_query", "pre_checkout_query", "my_chat_member"),
         )
 
-    def test_project_version_is_2_0_0(self) -> None:
+    def test_project_version_is_1_0_0(self) -> None:
         import tomllib
 
         pyproject = ROOT / "pyproject.toml"
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        self.assertEqual(data["project"]["version"], "2.0.0")
+        self.assertEqual(data["project"]["version"], "1.0.0")
 
-    def test_release_2_0_docs_name_new_contracts(self) -> None:
+    def test_release_1_0_docs_name_new_contracts(self) -> None:
         chassis = (ROOT / "docs" / "CHASSIS.md").read_text(encoding="utf-8")
         listener = (ROOT / "docs" / "LISTENER_INTEGRATION.md").read_text(encoding="utf-8")
         psybot = (ROOT / "docs" / "PSYBOT_INTEGRATION.md").read_text(encoding="utf-8")

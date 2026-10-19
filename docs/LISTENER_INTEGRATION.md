@@ -1,6 +1,6 @@
 # Спецификация стыковки: Bot Chassis ↔ Chat Listener
 
-**Статус:** канонический паспорт интеграции Chat Listener с Bot Chassis `2.0.0` (готовность рамы к миграции кузова; репозиторий кузова этим паспортом не меняется)
+**Статус:** канонический паспорт интеграции Chat Listener с Bot Chassis `1.0.0` (готовность рамы к миграции кузова; репозиторий кузова этим паспортом не меняется)
 
 **Рама:** `C:\Python\bot_chassis`
 
@@ -8,7 +8,7 @@
 
 **Точка сборки:** `bot_chassis.factory.create_complete_chassis`
 
-**Зависимость:** `bot-chassis @ git+https://github.com/Aski3108/bot-chassis.git@v2.0.0`
+**Зависимость:** `bot-chassis @ git+https://github.com/Aski3108/bot-chassis.git@v1.0.0`
 
 **Хуки Listener:** L1 — `6f2d492`, L2 — `6823f30`
 
@@ -287,7 +287,7 @@ Listener необходимо экранировать через `html.escape`.
 ### 5.2. Кнопки Listener и фактический формат API
 
 Семантически порт добавляет `sequence[sequence[InlineKeyboardButton]]` в
-готовую карточку. Фактический входной формат API рамы `2.0.0` (как и в `0.3.1`) — ряды пар
+готовую карточку. Фактический входной формат API рамы `1.0.0` (как и в `0.3.1`) — ряды пар
 `(text, callback_data)`; рама сама создаёт `InlineKeyboardButton`.
 
 ```python

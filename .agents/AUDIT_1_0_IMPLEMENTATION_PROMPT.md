@@ -1,4 +1,4 @@
-# Промпт независимого аудита реализации Bot Chassis Release 2.0
+# Промпт независимого аудита реализации Bot Chassis Release 1.0
 
 Этот файл предназначен для **отдельного чата-аудитора**. Исполнитель не аудирует сам себя. Аудит запускается не после каждого Gate, а после пяти логических пакетов и один раз сквозным финальным прогоном.
 
@@ -10,8 +10,8 @@
 AUDIT_BOUNDARY={B1|B2|B3|B4|B5|B6|B6-CLOSEOUT}
 BASE_REF={SHA до первого Gate проверяемого пакета}
 HEAD_REF={SHA/WORKTREE после последнего Gate проверяемого пакета}
-TARGET_VERSION=2.0.0
-PLAN=.agents/UPGRADE_2_0_PLAN_AUDIT.md
+TARGET_VERSION=1.0.0
+PLAN=.agents/UPGRADE_1_0_PLAN_AUDIT.md
 SPEC=.agents/ADMIN_REDESIGN_SPEC.md
 ```
 
@@ -22,7 +22,7 @@ SPEC=.agents/ADMIN_REDESIGN_SPEC.md
 - `B3`: A0 + A6;
 - `B4`: A1 + A2 + A3 + A4;
 - `B5`: A5 + A7;
-- `B6`: весь диапазон Release 2.0 + R2 до финального закрытия control plane;
+- `B6`: весь диапазон Release 1.0 + R2 до финального закрытия control plane;
 - `B6-CLOSEOUT`: только проверка записей control plane после PASS B6, без повторной оценки production-кода.
 
 Если работа ещё не закоммичена, вместо выдуманного `HEAD_REF` напиши `HEAD_REF=WORKTREE` и проверяй `git diff` плюс untracked-файлы. Не объявляй чистым то, что Git не показывает без `--no-index`.
@@ -43,7 +43,7 @@ SPEC=.agents/ADMIN_REDESIGN_SPEC.md
 4. `.agents/PROJECT_CONTEXT.md`;
 5. `.agents/ACTIVE_PLANS.md`;
 6. `.agents/TASK_TODO.md`;
-7. `.agents/UPGRADE_2_0_PLAN_AUDIT.md`;
+7. `.agents/UPGRADE_1_0_PLAN_AUDIT.md`;
 8. `.agents/ADMIN_REDESIGN_SPEC.md`;
 9. `docs/CHASSIS.md`;
 10. diff проверяемого диапазона.
@@ -228,7 +228,7 @@ py -m pytest tests/test_gate_p.py tests/test_payments.py tests/test_factory.py t
 Узкий прогон:
 
 ```powershell
-py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.py -q
+py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate9_admin.py -q
 ```
 
 ### A0 — menu, DB, root guard
@@ -271,7 +271,7 @@ Home labels byte-for-byte: `📊 Статистика`, `🔍 Найти пол�
 Узкий прогон:
 
 ```powershell
-py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.py tests/test_gate5a_support.py tests/test_gate9_admin.py tests/test_gate10_process.py tests/test_storage.py -q
+py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate4_lookup.py tests/test_gate5a_support.py tests/test_gate9_admin.py tests/test_gate10_process.py tests/test_storage.py -q
 ```
 
 ### A1 — dossier
@@ -333,7 +333,7 @@ py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.
 Узкий прогон:
 
 ```powershell
-py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.py tests/test_gate7_backup.py tests/test_gate8_reports.py tests/test_gate12_release.py -q
+py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate9_admin.py tests/test_gate7_backup.py tests/test_gate8_reports.py tests/test_gate12_release.py -q
 ```
 
 ### A5 — users list
@@ -370,7 +370,7 @@ py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.p
 
 ---
 
-## 9. B6 — финальный сквозной аудит Release 2.0
+## 9. B6 — финальный сквозной аудит Release 1.0
 
 B6 запускать только после PASS B1–B5 и подготовки R2. Использовать BASE_REF до S4-A и HEAD_REF release candidate.
 
@@ -411,10 +411,10 @@ rg -n "Санкции сети|profiling: активен|Планировщик:
 
 ### 9.5 Документация и версия
 
-- `docs/CHASSIS.md` содержит миграцию 0.3.1→2.0.0 и все новые public contracts;
+- `docs/CHASSIS.md` содержит миграцию 0.3.1→1.0.0 и все новые public contracts;
 - integration docs не заявляют, что соседние consumers уже обновлены;
 - ADMIN_REDESIGN_SPEC не противоречит startup fallback и фактическому UI;
-- `pyproject.toml` version `2.0.0` ровно в одном месте;
+- `pyproject.toml` version `1.0.0` ровно в одном месте;
 - CHANGELOG описывает breaking/compatibility/migration без выдуманных SHA;
 - TASK_TODO содержит R2/обновление спецификации шасси;
 - до PASS B6 control plane не заявляет релиз завершённым;
@@ -443,11 +443,11 @@ B6 может быть PASS только если нет обязательны�
 Проверить:
 
 1. `.agents/TASK_TODO.md`: все реально пройденные Gate/Audit отмечены; непройденные не закрыты; сохранён отдельный пункт обновления `docs/CHASSIS.md`/SPEC.
-2. `.agents/ACTIVE_PLANS.md`: Release 2.0 имеет фактический статус, ссылку на план и audit prompt.
+2. `.agents/ACTIVE_PLANS.md`: Release 1.0 имеет фактический статус, ссылку на план и audit prompt.
 3. `.agents/SESSION_STATE.md`: дата, ветка, версия, проверенный HEAD, числа full/frozen, следующий шаг и запреты актуальны.
 4. `.agents/PROJECT_LOG.md`: одна содержательная release-handoff запись, без выдуманных действий.
 5. `VERSION_LOG.md`: запись есть только если реально принят HEAD main или tag; SHA и состояние push проверены через Git.
 6. `CHANGELOG.md` и `pyproject.toml` не изменились после B6 иначе чем для исправления найденного блокера.
 7. Ни commit, tag, push, merge, restart или live smoke не были сделаны без отдельной команды владельца.
 
-Выдать отдельный `PASS/PASS WITH NOTES/BLOCKED`. Только PASS B6 + PASS B6-CLOSEOUT означает, что Release 2.0 документально закрыт и готов к отдельному решению владельца о commit/tag/push/consumer migration.
+Выдать отдельный `PASS/PASS WITH NOTES/BLOCKED`. Только PASS B6 + PASS B6-CLOSEOUT означает, что Release 1.0 документально закрыт и готов к отдельному решению владельца о commit/tag/push/consumer migration.

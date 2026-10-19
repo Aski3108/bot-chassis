@@ -5,19 +5,19 @@
 
 ---
 
-## v2.0.0 — 2026-10-19
+## v1.0.0 — 2026-10-19
 
 | Поле | Значение |
 |---|---|
-| Tag | аннотированный `v2.0.0`; target = release-metadata коммит с этой записью |
+| Tag | аннотированный `v1.0.0`; target = release-renumbering коммит с этой записью |
 | Branch | `main` |
 | Implementation / B6 HEAD | `3db41c9` `release: finalize bot chassis 2.0.0` |
 | Previous stable | `v0.3.1` |
 | Audit | повторный B6 — PASS; B6-CLOSEOUT — PASS; full 320, frozen 19 |
-| Why | Release 2.0: S4-A–C, P1–P3, редизайн админки и досье A0–A7, safe default backup, human reports и release-канон R2 |
-| Consumers | закреплять `v2.0.0`; мигрировать каждый кузов отдельно по его паспорту и contract-тестам |
+| Why | Release 1.0: S4-A–C, P1–P3, редизайн админки и досье A0–A7, safe default backup, human reports и release-канон R2 |
+| Consumers | закреплять `v1.0.0`; мигрировать каждый кузов отдельно по его паспорту и contract-тестам |
 | Profiling hold | старый tag `profiling` = `6823f30` не двигался |
-| Push | `main` и `v2.0.0` опубликованы вместе по отдельной команде владельца |
+| Push | `main` и `v1.0.0` опубликованы вместе по отдельной команде владельца |
 
 ---
 

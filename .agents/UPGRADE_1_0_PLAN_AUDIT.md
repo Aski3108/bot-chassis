@@ -1,4 +1,4 @@
-# Release 2.0 — хирургический план реализации (Bot Chassis)
+# Release 1.0 — хирургический план реализации (Bot Chassis)
 
 **Дата составления:** 2026-10-12
 **Статус:** Исправлено после независимого аудита; готово к последовательной реализации по одному Gate
@@ -8,9 +8,9 @@
 - канон рамы: `docs/CHASSIS.md`;
 - реестр планов: `.agents/ACTIVE_PLANS.md`;
 - текущее состояние: `.agents/SESSION_STATE.md`;
-- независимая приёмка реализации: `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`.
+- независимая приёмка реализации: `.agents/AUDIT_1_0_IMPLEMENTATION_PROMPT.md`.
 
-**Идентификатор пакета:** рабочее имя — Release 2.0; целевая версия пакета после зелёной реализации и документационного Gate R2 — `2.0.0`. До R2 значение `version = "0.3.1"` в `pyproject.toml` не менять.
+**Идентификатор пакета:** рабочее имя — Release 1.0; целевая версия пакета после зелёной реализации и документационного Gate R2 — `1.0.0`. До R2 значение `version = "0.3.1"` в `pyproject.toml` не менять.
 
 ---
 
@@ -19,7 +19,7 @@
 ## 1. Executive Verdict
 
 > **Вердикт плана после коррекции:** **READY FOR GATED IMPLEMENTATION**.
-> Этот документ является единственным исполняемым планом Release 2.0. Coding-модель не принимает архитектурных решений сама: она выполняет только текущий подтверждённый Gate, использует указанные callback-строки и сигнатуры, запускает перечисленные тесты и останавливается до команды владельца на следующий Gate.
+> Этот документ является единственным исполняемым планом Release 1.0. Coding-модель не принимает архитектурных решений сама: она выполняет только текущий подтверждённый Gate, использует указанные callback-строки и сигнатуры, запускает перечисленные тесты и останавливается до команды владельца на следующий Gate.
 
 Независимый аудит обнаружил блокеры в S4-A, S4-B, S4-C, P1, P3, A0, A1, A3, A4, A5, A6 и A7. Ниже они закрыты на уровне плана точными контрактами. Код проекта этим документом ещё не изменён.
 
@@ -28,12 +28,12 @@
 ## 2. Закрытые архитектурные решения
 
 1. **Telegram-клавиатуры:** максимум пять цифровых кнопок A5 в одном ряду; у Stars-инвойса `pay=True` строго в `[0][0]`; callback отмены постоянный и короче 64 байт.
-2. **Стартовое уведомление:** только `audit_chat_id/audit_thread_id`; если `audit_chat_id` отсутствует — только `superadmin_ids[0]`; `support_chat_id` для startup не используется. Это точечное решение Release 2.0 и оно должно синхронно исправить противоречащую строку в `ADMIN_REDESIGN_SPEC.md`.
+2. **Стартовое уведомление:** только `audit_chat_id/audit_thread_id`; если `audit_chat_id` отсутствует — только `superadmin_ids[0]`; `support_chat_id` для startup не используется. Это точечное решение Release 1.0 и оно должно синхронно исправить противоречащую строку в `ADMIN_REDESIGN_SPEC.md`.
 3. **Экран рамы для кузова:** единая публичная сигнатура `await chassis.screens.retire_active_screen(bot, user_id)`. `chat_id` берётся из записи трекера и извне не передаётся.
 4. **Single-message `/start`:** `single_message_start=False` сохраняет старый двухсообщенческий контракт. Один носитель возможен только когда итоговый экран не требует Inline-разметки; язык/toggle и уже отправленный callback-`Message` безопасно деградируют до двух сообщений.
 5. **Причина санкции:** pending-запись хранит и `target_user_id`, и вид санкции (`ban` либо `shadow_ban`), и координаты исходной панели. Для причины теневого бана вводится отдельное поле БД `shadow_ban_reason` с миграцией.
 6. **Автобэкап:** внешний аргумент остаётся `BackupPolicy | Literal[False] | None`, default остаётся `None`. Внутри фабрики он один раз нормализуется в `resolved_backup_policy: BackupPolicy | None`; значение `False` никогда не попадает в scheduler, admin-router или форматтеры.
-7. **Существующие тесты:** `tests/test_chassis.py` не меняется. Старые тесты админки, бэкапа и отчётов разрешено менять только там, где ожидание намеренно заменено этим Release 2.0; точный список приведён в Части III.
+7. **Существующие тесты:** `tests/test_chassis.py` не меняется. Старые тесты админки, бэкапа и отчётов разрешено менять только там, где ожидание намеренно заменено этим Release 1.0; точный список приведён в Части III.
 
 ---
 
@@ -51,11 +51,11 @@
 
 ---
 
-# ЧАСТЬ II. ТЕХНИЧЕСКИЙ ПЛАН RELEASE 2.0 (14 КОДОВЫХ ГЕЙТОВ + RELEASE GATE R2)
+# ЧАСТЬ II. ТЕХНИЧЕСКИЙ ПЛАН RELEASE 1.0 (14 КОДОВЫХ ГЕЙТОВ + RELEASE GATE R2)
 
 ## Железные инварианты разработки
 1. **Один Gate = один изолированный diff = один коммит** после прогона тестов.
-2. **Файл `tests/test_chassis.py` строго заморожен:** ровно 19 тестов, структура неизменна. Новые проверки пишутся только в `tests/test_gate_s4.py`, `tests/test_gate_p.py`, `tests/test_admin_v2.py`; существующие профильные тесты меняются только по матрице Части III. Для S4-B разрешена только точечная замена старого ожидания отсутствующей клавиатуры истории в `tests/test_gate5b_tickets.py` на проверку единственной кнопки `Закрыть`.
+2. **Файл `tests/test_chassis.py` строго заморожен:** ровно 19 тестов, структура неизменна. Новые проверки пишутся только в `tests/test_gate_s4.py`, `tests/test_gate_p.py`, `tests/test_admin_v1.py`; существующие профильные тесты меняются только по матрице Части III. Для S4-B разрешена только точечная замена старого ожидания отсутствующей клавиатуры истории в `tests/test_gate5b_tickets.py` на проверку единственной кнопки `Закрыть`.
 3. **Обратная совместимость сигнатур:** новые параметры в `factory.py` добавляются строго в конец keyword-only части. Единственное новое поле этого релиза — `single_message_start: bool = False`; это явно утверждённое исключение из общего правила default `None`.
 4. **Экранирование HTML:** все пользовательские данные (`username`, `first_name`, `traffic_source`) оборачиваются в `html.escape`.
 5. **CallbackQuery:** каждый обработанный callback получает ровно один `call.answer(...)`, включая ошибки, повторные клики и отказ доступа.
@@ -97,7 +97,7 @@
 
 ## Канонический граф очередности внедрения
 
-### Реестр callback_data Release 2.0
+### Реестр callback_data Release 1.0
 
 Coding-модель использует только эти значения; альтернативные префиксы не придумывать:
 
@@ -330,7 +330,7 @@ async def _deliver_start_result(message: Message, user_id: int, rendered: object
 
 **Цель:** единое видимое меню для staff/root, root-проверка на серверной стороне, отдельный рабочий экран БД и отсутствие legacy-экранов export/backup.
 
-**Файлы:** `admin/screens.py`, `admin/router.py`, `admin/broadcast.py`, `admin/process.py`, `admin/__init__.py`, `tests/test_admin_v2.py`; обновить намеренно устаревшие ожидания в `tests/test_admin.py` и `tests/test_gate9_admin.py`, а в `tests/test_gate10_process.py` — только два ожидания существующего staff-сценария: видимость restart при подключённом process port и отказ `Access Denied` с `show_alert=True` для forged callback.
+**Файлы:** `admin/screens.py`, `admin/router.py`, `admin/broadcast.py`, `admin/process.py`, `admin/__init__.py`, `tests/test_admin_v1.py`; обновить намеренно устаревшие ожидания в `tests/test_admin.py` и `tests/test_gate9_admin.py`, а в `tests/test_gate10_process.py` — только два ожидания существующего staff-сценария: видимость restart при подключённом process port и отказ `Access Denied` с `show_alert=True` для forged callback.
 
 **Константы:**
 ```python
@@ -400,7 +400,7 @@ _SECURITY_ALERT_THROTTLE: dict[tuple[str, int, str], float] = {}
 
 **Цель:** точный макет SPEC на данных текущего tenant и фактического Telegram-бота.
 
-**Файлы:** `admin/router.py`, `tests/test_admin_v2.py`; обновить соответствующие ожидания `tests/test_admin.py` и `tests/test_gate9_admin.py`.
+**Файлы:** `admin/router.py`, `tests/test_admin_v1.py`; обновить соответствующие ожидания `tests/test_admin.py` и `tests/test_gate9_admin.py`.
 
 **Расчёты `_dashboard`:**
 1. `total`, `sanctioned_total`, `shadow_banned` — из `users` по `bot_id`. `sanctioned_total` считать SQL-условием `is_banned = 1 OR is_shadow_banned = 1`; это число уникальных пользователей хотя бы с одной санкцией. `shadow_banned` считать отдельно. Не использовать `banned + shadow_banned`: пользователь с двумя флагами должен попасть в общий итог один раз.
@@ -444,7 +444,7 @@ Gift-подписки: <b>{gifts}</b>
 **Цель:** новая карточка данных и общий безопасный механизм её обновления. На этом Gate сохраняются старые action-кнопки; финальная иерархия кнопок достраивается A2–A4, чтобы ни один промежуточный коммит не имел кнопок без handler.
 
 **Файлы:** `admin/router.py`, `storage/repositories/user_bot_statuses.py`,
-`tests/test_admin_v2.py`; обновить dossier-ожидания в `tests/test_admin.py`.
+`tests/test_admin_v1.py`; обновить dossier-ожидания в `tests/test_admin.py`.
 Разрешены также ровно три неизбежные регрессии старого досье без изменения
 остального смысла тестов: `tests/test_gate3_lifecycle.py` — передать
 обязательный `telegram_bot_id` и заменить удалённую мультибот-таблицу на
@@ -549,7 +549,7 @@ if extra_lines:
 
 **Цель:** заменить две прямые toggle-кнопки явным подменю и исключить случайную инверсию состояния.
 
-**Файлы:** `admin/router.py`, `tests/test_admin_v2.py`; обновить связанные ожидания `tests/test_admin.py`.
+**Файлы:** `admin/router.py`, `tests/test_admin_v1.py`; обновить связанные ожидания `tests/test_admin.py`.
 
 **Сделать буквально:**
 1. Базовое досье заменяет прямые ban/shadow-кнопки одной кнопкой `adm_usr:menu:sanctions:<id>`.
@@ -573,7 +573,7 @@ if extra_lines:
 
 **Цель:** причина и вид санкции не теряются между callback и следующим сообщением; команды не поглощаются pending-handler.
 
-**Файлы:** `src/bot_chassis/followup.py`, `src/bot_chassis/__init__.py`, `src/bot_chassis/storage/schema.sql`, `src/bot_chassis/storage/engine.py`, `src/bot_chassis/storage/repositories/users.py`, `src/bot_chassis/admin/lookup.py`, `src/bot_chassis/admin/broadcast.py`, `src/bot_chassis/admin/screens.py`, `src/bot_chassis/admin/router.py`, `tests/test_admin_v2.py`, `tests/test_admin.py`, `tests/test_gate4_lookup.py`, `tests/test_gate5a_support.py`, `tests/test_gate9_admin.py`, `tests/test_gate10_process.py`, узкие migration-тесты в `tests/test_storage.py`. Голого `__init__.py` в этом Gate нет: разрешён только корневой пакетный `src/bot_chassis/__init__.py`.
+**Файлы:** `src/bot_chassis/followup.py`, `src/bot_chassis/__init__.py`, `src/bot_chassis/storage/schema.sql`, `src/bot_chassis/storage/engine.py`, `src/bot_chassis/storage/repositories/users.py`, `src/bot_chassis/admin/lookup.py`, `src/bot_chassis/admin/broadcast.py`, `src/bot_chassis/admin/screens.py`, `src/bot_chassis/admin/router.py`, `tests/test_admin_v1.py`, `tests/test_admin.py`, `tests/test_gate4_lookup.py`, `tests/test_gate5a_support.py`, `tests/test_gate9_admin.py`, `tests/test_gate10_process.py`, узкие migration-тесты в `tests/test_storage.py`. Голого `__init__.py` в этом Gate нет: разрешён только корневой пакетный `src/bot_chassis/__init__.py`.
 
 **Модель pending:**
 ```python
@@ -667,7 +667,7 @@ sanction_kind: AdminSanctionKind | None = None
 
 **Цель:** завершить финальную иерархию досье, сохранив существующий root-only контракт подарков и токенов.
 
-**Файлы:** `admin/router.py`, `tests/test_admin_v2.py`; обновить связанные ожидания `tests/test_admin.py`.
+**Файлы:** `admin/router.py`, `tests/test_admin_v1.py`; обновить связанные ожидания `tests/test_admin.py`.
 
 **ACL и базовое досье:**
 1. Staff видит только `[ 🔴 Санкции (Бан) ]`.
@@ -706,7 +706,7 @@ sanction_kind: AdminSanctionKind | None = None
 
 **Цель:** stateless-список всей tenant-базы с детерминированной пагинацией и безопасными callback_data.
 
-**Файлы:** `storage/repositories/users.py`, `admin/router.py`, `admin/screens.py`, `tests/test_admin_v2.py`; обновить поиск в `tests/test_admin.py`/`tests/test_gate9_admin.py` только по изменённому UI.
+**Файлы:** `storage/repositories/users.py`, `admin/router.py`, `admin/screens.py`, `tests/test_admin_v1.py`; обновить поиск в `tests/test_admin.py`/`tests/test_gate9_admin.py` только по изменённому UI.
 
 **Repository API:**
 ```python
@@ -715,7 +715,7 @@ async def list_users_page(
     self, bot_id: str, *, limit: int, offset: int
 ) -> list[UserRecord]:
 ```
-SQL order строго `ORDER BY created_at DESC, user_id DESC`; `limit=15` — единственный page size Release 2.0. SQL всегда содержит `bot_id`.
+SQL order строго `ORDER BY created_at DESC, user_id DESC`; `limit=15` — единственный page size Release 1.0. SQL всегда содержит `bot_id`.
 
 **Экран поиска:** скрытую поддержку команды `/cancel` оставить для обратной совместимости, но в сообщении её не показывать. Текст копировать буквально:
 ```html
@@ -758,7 +758,7 @@ SQL order строго `ORDER BY created_at DESC, user_id DESC`; `limit=15` — 
 
 **Цель:** безопасно изменить значение `None` с «выключено» на «штатная политика для файловой БД», сохранив явный opt-out и тестовую изоляцию.
 
-**Файлы:** `factory.py`, `admin/router.py`, `admin/audit.py`, `scheduler.py`, `reports.py`, `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md`, `tests/test_admin_v2.py`; разрешённые коррекции `tests/test_gate7_backup.py`, `tests/test_gate8_reports.py`, `tests/test_gate12_release.py`.
+**Файлы:** `factory.py`, `admin/router.py`, `admin/audit.py`, `scheduler.py`, `reports.py`, `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md`, `tests/test_admin_v1.py`; разрешённые коррекции `tests/test_gate7_backup.py`, `tests/test_gate8_reports.py`, `tests/test_gate12_release.py`.
 
 **Тип и нормализация:**
 ```python
@@ -869,14 +869,14 @@ else:
 
 ### Фаза 5. Release handoff после зелёного кода
 
-#### Gate R2: Канон рамы, версия 2.0.0 и control plane
+#### Gate R2: Канон рамы, версия 1.0.0 и control plane
 
-**Когда разрешён:** только после PASS контрольных аудитов B1–B5 из `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md` и полного зелёного suite. R2 не исправляет production-код. Если B1–B5 нашли дефект, сначала отдельный correction Gate и повтор соответствующего аудита.
+**Когда разрешён:** только после PASS контрольных аудитов B1–B5 из `.agents/AUDIT_1_0_IMPLEMENTATION_PROMPT.md` и полного зелёного suite. R2 не исправляет production-код. Если B1–B5 нашли дефект, сначала отдельный correction Gate и повтор соответствующего аудита.
 
 **Разрешённые файлы:** `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md`, `.agents/ADMIN_REDESIGN_SPEC.md`, `.agents/ACTIVE_PLANS.md`, `.agents/TASK_TODO.md`, `.agents/SESSION_STATE.md`, `.agents/PROJECT_LOG.md`, `CHANGELOG.md`, `VERSION_LOG.md`, `pyproject.toml`, узкие version/docs assertions в `tests/test_gate12_release.py`.
 
 **Делать в таком порядке:**
-1. `docs/CHASSIS.md`: заменить статус `0.3.1` на актуальный `2.0.0`; добавить раздел `Миграция 0.3.1 → 2.0.0` со всеми публичными изменениями:
+1. `docs/CHASSIS.md`: заменить статус `0.3.1` на актуальный `1.0.0`; добавить раздел `Миграция 0.3.1 → 1.0.0` со всеми публичными изменениями:
    - `single_message_start=False` и пять его веток;
    - `chassis.screens.retire_active_screen(bot, user_id)`;
    - `backup_policy=None` теперь включает backup только для файловой SQLite, `False` отключает, in-memory не включает;
@@ -884,16 +884,16 @@ else:
    - новые admin callback-экраны, root-only границы и единый `PendingInputStore`;
    - неизменность `bot_gateway.py` и frozen-suite.
 2. `docs/LISTENER_INTEGRATION.md` и `docs/PSYBOT_INTEGRATION.md`: обновить только монтаж публичных контрактов из пункта 1. Не менять код/репозитории кузовов и не заявлять, что потребители уже мигрировали.
-3. `.agents/ADMIN_REDESIGN_SPEC.md`: привести §2–§9 к фактически принятой реализации. Обязательно исправить §9.1: startup идёт в audit destination, а при его отсутствии — только первому superadmin; `SUPPORT_CHAT_ID` не является fallback startup. В каждом реализованном пункте поставить статус `реализовано в 2.0.0`; отложенные payment-delivery queue и Ops Sidecar оставить отложенными.
-4. `pyproject.toml`: изменить только `[project].version` с `0.3.1` на `2.0.0`.
-5. `CHANGELOG.md`: сверху добавить `[2.0.0]` с блоками «Добавлено», «Изменено», «Безопасность», «Совместимость», «Миграция». Не писать SHA, которых ещё нет.
-6. `tests/test_gate12_release.py`: изменить/добавить только проверки версии `2.0.0` и новых публичных keyword-only контрактов. Не ослаблять старые проверки.
+3. `.agents/ADMIN_REDESIGN_SPEC.md`: привести §2–§9 к фактически принятой реализации. Обязательно исправить §9.1: startup идёт в audit destination, а при его отсутствии — только первому superadmin; `SUPPORT_CHAT_ID` не является fallback startup. В каждом реализованном пункте поставить статус `реализовано в 1.0.0`; отложенные payment-delivery queue и Ops Sidecar оставить отложенными.
+4. `pyproject.toml`: изменить только `[project].version` с `0.3.1` на `1.0.0`.
+5. `CHANGELOG.md`: сверху добавить `[1.0.0]` с блоками «Добавлено», «Изменено», «Безопасность», «Совместимость», «Миграция». Не писать SHA, которых ещё нет.
+6. `tests/test_gate12_release.py`: изменить/добавить только проверки версии `1.0.0` и новых публичных keyword-only контрактов. Не ослаблять старые проверки.
 7. Запустить финальные команды §6. До их успеха не менять статусы control plane на «завершено».
 8. После PASS финального аудита B6 обновить `.agents/TASK_TODO.md`, `.agents/ACTIVE_PLANS.md`, `.agents/SESSION_STATE.md`, `.agents/PROJECT_LOG.md`: записать фактические результаты, число тестов, `BASE_REF`, проверенный `HEAD_REF` и отсутствие/наличие tag/push. Не придумывать SHA заранее.
 9. `VERSION_LOG.md` обновлять только когда действительно принят новый HEAD `main` или сдвинут tag. Если коммита/tag ещё нет, записать handoff в `PROJECT_LOG.md`, но не создавать фиктивную версию в `VERSION_LOG.md`.
-10. Коммит, merge, tag `v2.0.0`, push, live Telegram smoke и переключение потребителей не выполнять без отдельных команд владельца.
+10. Коммит, merge, tag `v1.0.0`, push, live Telegram smoke и переключение потребителей не выполнять без отдельных команд владельца.
 
-**DoD R2:** `rg -n "0\.3\.1" docs/CHASSIS.md docs/LISTENER_INTEGRATION.md docs/PSYBOT_INTEGRATION.md` не находит ложных утверждений о текущей версии; исторические строки миграции допустимы. `pyproject.toml` содержит ровно одну версию `2.0.0`. Канон, SPEC и changelog описывают одинаковые публичные контракты.
+**DoD R2:** `rg -n "0\.3\.1" docs/CHASSIS.md docs/LISTENER_INTEGRATION.md docs/PSYBOT_INTEGRATION.md` не находит ложных утверждений о текущей версии; исторические строки миграции допустимы. `pyproject.toml` содержит ровно одну версию `1.0.0`. Канон, SPEC и changelog описывают одинаковые публичные контракты.
 
 ---
 
@@ -979,7 +979,7 @@ else:
 
 ### R2
 1. Сначала `docs/CHASSIS.md` и интеграционные паспорта; затем SPEC; затем `pyproject.toml`/CHANGELOG/tests; control plane — только после B6 PASS.
-2. Обязательные тесты: `test_project_version_is_2_0_0`, `test_release_2_0_public_factory_defaults`, `test_release_2_0_docs_name_new_contracts`.
+2. Обязательные тесты: `test_project_version_is_1_0_0`, `test_release_1_0_public_factory_defaults`, `test_release_1_0_docs_name_new_contracts`.
 3. Стоп: никакого tag/push/merge/live smoke; `VERSION_LOG.md` не содержит выдуманный SHA.
 
 ---
@@ -1006,7 +1006,7 @@ else:
 | `tests/test_gate_s4.py` | Создать новые тесты S4-A/B/C | Смешивать admin/payments |
 | `tests/test_gate5b_tickets.py` | S4-B: заменить только ожидание отсутствующей клавиатуры истории на одну кнопку `Закрыть` с `CB_NAV_CLOSE` | Менять SQL, порядок истории, reply-to и остальные тесты тикетов |
 | `tests/test_gate_p.py` | Создать новые тесты P1/P2/P3 | Дублировать весь старый payments-suite |
-| `tests/test_admin_v2.py` | Создать новые тесты A0–A7 | Проверять внутренности кузовов |
+| `tests/test_admin_v1.py` | Создать новые тесты A0–A7 | Проверять внутренности кузовов |
 | `tests/test_payments.py` | Только намеренно изменившийся invoice markup/cancel | Переписывать pre-checkout/successful-payment контракт |
 | `tests/test_admin.py` | Старые ожидания текста, кнопок и Stay-in-Dossier; A3 — собственный PendingInputStore вместо global reset | Ослаблять ACL, tenant isolation, команды и ошибки |
 | `tests/test_gate3_lifecycle.py` | A1 — только существующий dossier-блок: обязательный `telegram_bot_id`, статус текущего бота и отсутствие удалённой мультибот-таблицы | Менять lifecycle handlers, transition/alert semantics и остальные тесты файла |
@@ -1026,29 +1026,29 @@ else:
 
 - S4-A/B/C: `py -m pytest tests/test_gate_s4.py tests/test_factory.py tests/test_integration.py -q`
 - P1/P2/P3: `py -m pytest tests/test_gate_p.py tests/test_payments.py tests/test_factory.py tests/test_gate12_release.py -q`
-- A0/A6: `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate9_admin.py -q`
-- A1/A2/A4/A5: `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.py -q`
-- A3: `py -m pytest tests/test_admin_v2.py tests/test_admin.py tests/test_gate4_lookup.py tests/test_gate5a_support.py tests/test_gate9_admin.py tests/test_gate10_process.py tests/test_storage.py -q`
-- A7: `py -m pytest tests/test_admin_v2.py tests/test_gate7_backup.py tests/test_gate8_reports.py tests/test_gate12_release.py -q`
+- A0/A6: `py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate9_admin.py -q`
+- A1/A2/A4/A5: `py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate4_lookup.py -q`
+- A3: `py -m pytest tests/test_admin_v1.py tests/test_admin.py tests/test_gate4_lookup.py tests/test_gate5a_support.py tests/test_gate9_admin.py tests/test_gate10_process.py tests/test_storage.py -q`
+- A7: `py -m pytest tests/test_admin_v1.py tests/test_gate7_backup.py tests/test_gate8_reports.py tests/test_gate12_release.py -q`
 - R2: `py -m pytest tests/test_gate12_release.py -q`
 
 После любой узкой команды обязателен полный suite.
 
 ## 3.1. Независимые контрольные аудиты — не после каждого Gate
 
-Использовать только `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md` и отдельный чат-аудитор:
+Использовать только `.agents/AUDIT_1_0_IMPLEMENTATION_PROMPT.md` и отдельный чат-аудитор:
 
 1. `B1` после S4-A + S4-B + S4-C. До PASS не начинать P1.
 2. `B2` после P1 + P2 + P3. До PASS не начинать A0.
 3. `B3` после A0 + A6. До PASS не начинать A1.
 4. `B4` после A1 + A2 + A3 + A4. До PASS не начинать A5.
 5. `B5` после A5 + A7. Только после PASS разрешён R2.
-6. `B6` после R2 — полный сквозной аудит всего Release 2.0.
+6. `B6` после R2 — полный сквозной аудит всего Release 1.0.
 7. После PASS B6 исполнитель фиксирует фактический handoff в control plane; `B6-CLOSEOUT` проверяет только эти записи.
 
 `BLOCKED` закрывается отдельным correction Gate с собственным diff и повтором того же boundary. `PASS WITH NOTES` не разрешает игнорировать СРЕДНИЕ находки: владелец явно принимает их либо назначает correction Gate.
 
-## 4. Финальный dead-code аудит Release 2.0
+## 4. Финальный dead-code аудит Release 1.0
 
 Перед релизным handoff выполнить `rg` и подтвердить:
 

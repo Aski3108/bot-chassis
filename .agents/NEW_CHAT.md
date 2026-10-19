@@ -18,8 +18,8 @@
 8. `.agents/UPGRADE_0_3_PLAN.md` — технические критерии Gate `0.3`;
 9. `.agents/UPGRADE_0_3_1_PLAN.md` — технические критерии Gate `0.3.1`;
 10. `.agents/ADMIN_REDESIGN_SPEC.md` — утверждённая архитектурная спецификация редизайна админки, досье и отчётов;
-11. `.agents/UPGRADE_2_0_PLAN_AUDIT.md` — единственный технический план Release 2.0;
-12. `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md` — независимые проверки B1–B6;
+11. `.agents/UPGRADE_1_0_PLAN_AUDIT.md` — единственный технический план Release 1.0;
+12. `.agents/AUDIT_1_0_IMPLEMENTATION_PROMPT.md` — независимые проверки B1–B6;
 13. `docs/CHASSIS.md` — канон рамы, не backlog;
 14. `.agents/PROJECT_LOG.md` — только последние релевантные записи.
 
@@ -45,11 +45,11 @@
 
 ## СТАРТ СЕЙЧАС
 
-Bot Chassis `2.0.0` завершён на `main`. Implementation/release-коммит —
+Bot Chassis `1.0.0` завершён на `main`. Implementation/release-коммит —
 `3db41c9`; повторный B6 и B6-CLOSEOUT — **PASS**. Проверки: полный suite
 **320 passed**, frozen **19 passed**, compile/import/diff чистые.
 
-Аннотированный tag `v2.0.0` является стабильной точкой подключения кузовов и
+Аннотированный tag `v1.0.0` является стабильной точкой подключения кузовов и
 публикуется вместе с `main`. Старый hold-tag `profiling` остаётся на
 `6823f30` и не двигается автоматически. PsyBot, Chat Listener и Profiling
 мигрируют только в собственных репозиториях по паспортам из `docs/`.
@@ -61,13 +61,13 @@ Bot Chassis `2.0.0` завершён на `main`. Implementation/release-ком�
 - технический план `0.3`: `.agents/UPGRADE_0_3_PLAN.md`;
 - единственный технический план `0.3.1`: `.agents/UPGRADE_0_3_1_PLAN.md`;
 - архитектурная спецификация редизайна админки: `.agents/ADMIN_REDESIGN_SPEC.md`;
-- единственный технический план Release 2.0: `.agents/UPGRADE_2_0_PLAN_AUDIT.md`;
-- аудит реализации Release 2.0: `.agents/AUDIT_2_0_IMPLEMENTATION_PROMPT.md`;
+- единственный технический план Release 1.0: `.agents/UPGRADE_1_0_PLAN_AUDIT.md`;
+- аудит реализации Release 1.0: `.agents/AUDIT_1_0_IMPLEMENTATION_PROMPT.md`;
 - состояние: `.agents/SESSION_STATE.md`;
 - история аудитов и текущий handoff: `.agents/AUDIT_LOG_0_3.md`;
 - канон: `docs/CHASSIS.md`;
 - версии: `VERSION_LOG.md`, `CHANGELOG.md`.
 
 **Следующее действие:** только отдельная миграция выбранного кузова на
-`v2.0.0` с его contract-тестами и разрешённым live smoke. Новые функции рамы,
+`v1.0.0` с его contract-тестами и разрешённым live smoke. Новые функции рамы,
 payment-delivery queue, Ops Sidecar и Gate 13 не смешивать с миграцией.

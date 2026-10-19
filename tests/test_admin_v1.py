@@ -1,4 +1,4 @@
-"""Release 2.0 Gate A0: общее меню, экран БД и throttled root guard."""
+"""Release 1.0 Gate A0: общее меню, экран БД и throttled root guard."""
 
 from __future__ import annotations
 
