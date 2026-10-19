@@ -104,7 +104,7 @@ def _texts(session: _Session):
 
 
 class TestGate12FactoryContract(unittest.TestCase):
-    def test_new_factory_params_are_keyword_only_none(self) -> None:
+    def test_release_2_0_public_factory_defaults(self) -> None:
         signature = inspect.signature(create_complete_chassis)
         for name in NEW_NONE_KWONLY:
             param = signature.parameters[name]
@@ -121,6 +121,44 @@ class TestGate12FactoryContract(unittest.TestCase):
             CANON_ALLOWED_UPDATES,
             ("message", "callback_query", "pre_checkout_query", "my_chat_member"),
         )
+
+    def test_project_version_is_2_0_0(self) -> None:
+        import tomllib
+
+        pyproject = ROOT / "pyproject.toml"
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        self.assertEqual(data["project"]["version"], "2.0.0")
+
+    def test_release_2_0_docs_name_new_contracts(self) -> None:
+        chassis = (ROOT / "docs" / "CHASSIS.md").read_text(encoding="utf-8")
+        listener = (ROOT / "docs" / "LISTENER_INTEGRATION.md").read_text(encoding="utf-8")
+        psybot = (ROOT / "docs" / "PSYBOT_INTEGRATION.md").read_text(encoding="utf-8")
+        admin_spec = (ROOT / ".agents" / "ADMIN_REDESIGN_SPEC.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+        for expected in (
+            "single_message_start: bool = False",
+            "chassis.screens.retire_active_screen(bot, user_id)",
+            "backup_policy=False",
+            "PendingInputStore",
+            "15 на страницу",
+        ):
+            self.assertIn(expected, chassis)
+        for passport in (listener, psybot):
+            self.assertIn("backup_policy=None", passport)
+            self.assertIn("mode=memory", passport)
+        self.assertIn("ровно по 15 записей", admin_spec)
+        self.assertIn("UserScreenTracker", admin_spec)
+
+        for obsolete in (
+            "adm:usr:p:*",
+            "core_pay:cancel",
+            "core_sup:hist_close",
+            "adm:db_menu",
+            "ChassisScreenTracker",
+            "create_bot_chassis(",
+        ):
+            self.assertNotIn(obsolete, changelog)
 
 
 class TestGate12Migration(unittest.IsolatedAsyncioTestCase):

@@ -34,7 +34,7 @@ from ..followup import (
     PendingScope,
 )
 from ..config import BotChassisConfig, resolved_origin
-from ..policies import BACKUP_JOB_KEY, UTC_PLUS_5, BackupPolicy, ReportingPolicy
+from ..policies import BACKUP_JOB_KEY, UTC_PLUS_5
 from ..ports.admin_extra import ExtraAdminActions
 from ..storage.backup import write_manual_snapshot
 from ..storage import Storage
@@ -53,7 +53,7 @@ from .lookup import (
 )
 from .user_resolve import format_ambiguous_users, resolve_user_token
 from .export import EXPORT_SCOPES, XLSX_FILENAME, build_export, build_xlsx_export
-from .filters import AdminRoleFilter, SuperadminRoleFilter, SUPERADMIN_ONLY
+from .filters import AdminRoleFilter, SuperadminRoleFilter
 from .process import register_process_control
 from .screens import (
     CB_BACK,
@@ -175,8 +175,6 @@ def create_admin_router(
             extra_actions,
             is_root=is_root,
             telegram_bot_id=telegram_bot_id,
-            backup_policy=backup_policy,
-            reporting_policy=reporting_policy,
             process_control=process_control,
         )
 
@@ -187,8 +185,6 @@ def create_admin_router(
             extra_actions,
             is_root=is_root,
             telegram_bot_id=telegram_bot_id,
-            backup_policy=backup_policy,
-            reporting_policy=reporting_policy,
             process_control=process_control,
         )
         await panels.send_panel(bot, bot_id, actor_id, text, markup)
@@ -906,8 +902,6 @@ def create_admin_router(
             storage,
             bot_id,
             int(call.bot.id),
-            backup_policy=backup_policy,
-            reporting_policy=reporting_policy,
         )
         text = _stats_text(dash)
         await panels.edit_or_send(
@@ -1161,16 +1155,12 @@ async def _home(
     *,
     is_root: bool,
     telegram_bot_id: int,
-    backup_policy: BackupPolicy | None = None,
-    reporting_policy: ReportingPolicy | None = None,
     process_control=None,
 ) -> tuple[str, InlineKeyboardMarkup]:
     dash = await _dashboard(
         storage,
         bot_id,
         telegram_bot_id,
-        backup_policy=backup_policy,
-        reporting_policy=reporting_policy,
     )
     lines = [
         "🛠 <b>Админка</b>",
@@ -1180,7 +1170,6 @@ async def _home(
         f"Открытые обращения: {dash['open_tickets']}",
         f"Платежи Stars сегодня: {dash['stars_today']}",
         f"Последний бэкап: {html.escape(dash['last_backup'])}",
-        f"Планировщик: {html.escape(dash['scheduler'])}",
         "Рубильник: " + ("🔴 опущен" if dash["maintenance_on"] else "🟢 снят"),
     ]
     if dash["maintenance_on"] and dash["reason"]:
@@ -1923,9 +1912,6 @@ async def _dashboard(
     storage: Storage,
     bot_id: str,
     telegram_bot_id: int,
-    *,
-    backup_policy: BackupPolicy | None = None,
-    reporting_policy: ReportingPolicy | None = None,
 ) -> dict:
     now_utc = datetime.now(timezone.utc)
     midnight = datetime.now(UTC_PLUS_5).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2028,7 +2014,6 @@ async def _dashboard(
     data = await storage.engine.run(_op)
     data["last_backup"] = last_backup_raw
     data["last_backup_label"] = _format_last_backup(last_backup)
-    data["scheduler"] = _scheduler_label(backup_policy, reporting_policy)
     return data
 
 
@@ -2040,17 +2025,3 @@ def _format_last_backup(row: dict | None) -> str:
         return "нет"
     local = parse_utc(stamp).astimezone(UTC_PLUS_5)
     return local.strftime("%Y-%m-%d %H:%M (UTC+5)")
-
-
-def _scheduler_label(
-    backup_policy: BackupPolicy | None,
-    reporting_policy: ReportingPolicy | None,
-) -> str:
-    if backup_policy is None and reporting_policy is None:
-        return "выключен"
-    bits = []
-    if backup_policy is not None:
-        bits.append(f"backup {backup_policy.hour:02d}:{backup_policy.minute:02d} {backup_policy.tz_label}")
-    if reporting_policy is not None:
-        bits.append(f"report {reporting_policy.hour:02d}:{reporting_policy.minute:02d} {reporting_policy.tz_label}")
-    return "включён (" + "; ".join(bits) + ")"

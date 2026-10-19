@@ -133,8 +133,8 @@ class TestGate9AdminScreens(unittest.IsolatedAsyncioTestCase):
         home = self._named("SendMessage")[0]
         callbacks = [button.callback_data for row in home.reply_markup.inline_keyboard for button in row]
         self.assertEqual(callbacks, [CB_GO_STATS, CB_FIND, CB_GO_BCAST, CB_GO_DB, CB_GO_MAINT])
-        self.assertIn("Планировщик: включён", home.text)
-        self.assertIn("backup 04:00", home.text)
+        self.assertNotIn("Планировщик", home.text)
+        self.assertNotIn("backup 04:00", home.text)
 
         self.session.requests.clear()
         await self._callback(14, CB_GO_STATS, 2)

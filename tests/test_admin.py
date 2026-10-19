@@ -272,7 +272,7 @@ class TestAdminHome(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Новые сегодня:", text)
         self.assertIn("Открытые обращения:", text)
         self.assertIn("Платежи Stars сегодня:", text)
-        self.assertIn("Планировщик: выключен", text)
+        self.assertNotIn("Планировщик", text)
         self.assertIn("🟢 снят", text)
         self.assertNotIn("Команды:", text)
         self.assertNotIn("/export", text)

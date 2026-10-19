@@ -161,9 +161,34 @@ Gate 13. Владелец 2026-09-29 пропустил этот шаг; тек�
 - [x] **A5.** Stateless-список пользователей по 15 записей и максимум 5 цифровых кнопок в ряду. Реализация и коррекция блокеров приняты повторным B5 с PASS 2026-10-16.
 - [x] **A7.** Безопасный default backup и человекочитаемые audit/report/backup карточки. Реализация и коррекция блокеров приняты повторным B5 с PASS 2026-10-16.
 - [x] **B5.** Независимый аудит A5 + A7 — **PASS** после коррекции блокеров; результат подтверждён владельцем 2026-10-16.
-- [ ] **R2. Обновить спецификацию и канон шасси.** После PASS B1–B5 синхронизировать `docs/CHASSIS.md`, `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md` и `.agents/ADMIN_REDESIGN_SPEC.md`; поднять `pyproject.toml` до `2.0.0`, добавить `CHANGELOG.md` и release-тесты. Не объявлять соседние кузова мигрированными.
-- [ ] **B6. Финальный независимый аудит Release 2.0.** Полный diff, security/data/async/migration/dead-code/docs/version проверки и полный suite; frozen — ровно 19.
-- [ ] **Release 2.0 closeout.** Только после PASS B6 записать фактические результаты в `TASK_TODO`, `ACTIVE_PLANS`, `SESSION_STATE`, `PROJECT_LOG`; `VERSION_LOG` менять только при реально принятом HEAD/tag; затем пройти B6-CLOSEOUT. Commit/tag/push/live smoke — только отдельными командами владельца.
+- [x] **R2. Обновить спецификацию и канон шасси.** Синхронизированы `docs/CHASSIS.md` (миграция 0.3.1→2.0.0), `docs/LISTENER_INTEGRATION.md`, `docs/PSYBOT_INTEGRATION.md` и `.agents/ADMIN_REDESIGN_SPEC.md` (статусы Gate A0-A7, S4, P1-P3); `pyproject.toml` поднят до `2.0.0`; добавлена секция `## [2.0.0] — 2026-10-16` в `CHANGELOG.md`; добавлен тест версии в `tests/test_gate12_release.py`. Сьют: 319 passed, frozen 19 passed. Production-код не затронут.
+- [x] **B6. Финальный независимый аудит Release 2.0.** Повтор 2026-10-19
+  после correction Gate — **PASS**. Полный suite **320 passed**, frozen
+  **19 passed**; гейтовые наборы **26/38/78/34 passed**; `compileall`,
+  `ruff F401`, `git diff --check`, docs/version/scope и неизменность
+  `tests/test_chassis.py`/`bot_gateway.py` подтверждены.
+- [x] **B6-CORRECTION** (добавлено 2026-10-17 17:20). Указание владельца:
+  «исполняй все блоки и мелочи тоже, без заплаток. как мы планировали
+  изначально. делай». Закрыть все подтверждённые находки B6: синхронизировать
+  реальный контракт Release 2.0 в `CHANGELOG.md`, `docs/CHASSIS.md` и
+  `.agents/ADMIN_REDESIGN_SPEC.md`; убрать `Планировщик:` и связанный мёртвый
+  код из нового admin UI; исправить устаревший docstring `policies.py`; добавить
+  обязательные проверки R2; затем повторить полный B6 по исходной границе.
+  Разрешённая граница correction Gate: `src/bot_chassis/admin/router.py`,
+  `src/bot_chassis/policies.py`, `tests/test_admin.py`,
+  `tests/test_gate9_admin.py`, `tests/test_gate12_release.py`, `CHANGELOG.md`,
+  `docs/CHASSIS.md`, `.agents/ADMIN_REDESIGN_SPEC.md` и служебные журналы
+  `.agents/`.
+  Возобновлено 2026-10-19 08:31 после обрыва лимита. Указание владельца:
+  «Ещё раз всё внимательно проверь. Чтоб нигде там не залажать добро».
+- [x] **Release 2.0 closeout.** Control plane синхронизирован после PASS B6;
+  B6-CLOSEOUT 2026-10-19 — **PASS**. На момент closeout `VERSION_LOG.md` не
+  менялся: release-коммит разрешён следующим отдельным пунктом, tag ещё не
+  принят. Commit/tag/push/live smoke остаются отдельными командами владельца.
+- [x] **Финальный commit Release 2.0** (добавлено 2026-10-19 08:46).
+  Отдельная команда владельца: «коммить». Этим коммитом фиксируется ровно
+  проверенный diff R2 + B6-CORRECTION + B6-CLOSEOUT. Tag, push, live smoke и
+  миграция кузовов в команду не входят.
 
 ---
 
